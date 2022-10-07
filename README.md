@@ -1,3 +1,6 @@
+## Where Do People Go After the Storm?
+### An Analysis of Migration Following Tropical Storms in the United States between 1990 and 2010
+
 Tropical Storms are among the most devastating natural disasters in the United States. Climate change is projected to make them even more destructive, and the number of people and properties at risk has steadily increased. Migration is often seen by scholars as an adaptation strategy to the risk posed by natural disasters, and the concept of managed retreat has been proposed as a possible solution to the challenges posed by climate change. However, studies of migration after tropical storms have led to inconsistent	results and have not analysed post-storm migration from the viewpoint of risk. This paper uses an innovative approach based on estimating “excess migration” associated with tropical storms, and decomposes migration by risk level of the origin and destination to understand whether migrants move to safer areas or rather riskier ones. It finds that excess migration after tropical storms is relatively rare and does not reduce the number of people at risk.
 
 For more theoretical background and details about the methodology and the data sources refer to the draft of the article (PAA_Revised.pdf)
