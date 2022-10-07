@@ -1,0 +1,331 @@
+---
+title: "Fit Models for Out-Migration"
+author: "Eugenio Paglino"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F,
+                      warning = F,
+                      message = F)
+```
+
+```{r,echo=FALSE}
+
+library(USAboundaries)
+library(sf)
+library(spdep)
+library(INLA)
+library(patchwork)
+library(here)
+library(glue)
+library(tidyverse)
+
+```
+
+Setting the working directories.
+
+```{r}
+
+rm(list=ls())
+
+i_am('secondYearPaper/R/fitOutModel.Rmd')
+
+inDir <- here('data','input')
+outDir <- here('secondYearPaper','data','output')
+figuresDir <- here('secondYearPaper','figuresBayes')
+tablesDir <- here('secondYearPaper','tables')
+
+set.seed(42)
+
+```
+
+Reading the final data.
+
+```{r, cache=T}
+
+load(here(outDir,'outMigData.RData'))
+
+outMigData <- outMigData %>%
+  filter(!(destination %in% c('00000','99999','riskNA')),
+         year<=2010) %>%
+  distinct(origin,destination,year,.keep_all = T)
+
+completeData <- crossing(origin = unique(pull(outMigData,origin)),
+                         destination = unique(pull(outMigData,destination)),
+                         year = 1990:2010)
+
+originData <- outMigData %>%
+  distinct(origin,year,.keep_all = T) %>%
+  select(origin,originName,year,treat,pop,
+         logSHELDUSDmgPC,logCumSHELDUSDmgPC,
+         logNFIPPC,logCumNFIPPC,
+         logAssistancePC,logCumAssistancePC,
+         logPopCensus,logPopDensity,
+         pctYoung,pctOld,pctBlack,pctWhite,
+         socioEcon,houseComp,minorityStat,housing,SVI)
+
+outMigData <- completeData %>%
+  left_join(originData,by=c('origin','year')) %>%
+  left_join(select(outMigData,c(origin,destination,year,individuals)),
+            by=c('origin','destination','year')) %>%
+  mutate(individualsImp = floor(rbeta(nrow(completeData),1,1)*9+1),
+         individuals = if_else(is.na(individuals) | individuals==0,
+                               individualsImp,
+                               individuals))
+  
+```
+
+```{r}
+
+counties <- us_counties()
+# Transform to Albers for making map of US
+counties <- st_transform(counties, 5070)
+
+counties <- counties %>%
+  select(geoid,stusps,geometry) %>%
+  filter(stusps != 'PR') %>%
+  select(-stusps) %>%
+  rename(FIPSCode = geoid) %>%
+  filter(FIPSCode %in% unique(pull(outMigData,origin))) %>%
+  arrange(FIPSCode)
+
+```
+
+```{r}
+
+neighbors <- poly2nb(counties)
+
+# We can edit neighbors manually but we need to be very careful because
+# neighborhood is here a symmetric relationship so that everything breaks
+# (in INLA) if A is B's neighbor. but B is not A's neighbor.
+
+nb2INLA(here(inDir,'neighborsOut.graph'),neighbors)
+inla.graph <- inla.read.graph(here(inDir,'neighborsOut.graph'))
+adj.matrix <- inla.graph2matrix(inla.graph)
+
+```
+
+```{r, warning=F, message=F}
+
+neighbors_sf <- as(nb2lines(neighbors, coords = coordinates(as(counties,'Spatial'))), 'sf')
+neighbors_sf <- st_set_crs(neighbors_sf, st_crs(counties))
+
+counties %>%
+  ggplot() + 
+    geom_sf(fill = 'salmon', color = 'white') +
+    geom_sf(data = neighbors_sf) +
+    theme_minimal()
+
+```
+
+```{r}
+
+outMigData <- outMigData %>%
+  arrange(origin,destination,year) %>%
+  group_by(origin) %>%
+  mutate(FIPSID = cur_group_id(),
+         FIPSID2 = FIPSID,
+         FIPSID3 = FIPSID) %>%
+  ungroup() %>%
+  group_by(year) %>%
+  mutate(yearID = cur_group_id(),
+         yearID2 = yearID,
+         yearID3 = yearID) %>%
+  ungroup()
+
+```
+
+```{r}
+
+nZQuants <- outMigData %>%
+  filter(destination=='anyRisk') %>%
+  drop_na(logCumSHELDUSDmgPC) %>%
+  filter(logCumSHELDUSDmgPC > 0) %>%
+  pull(logCumSHELDUSDmgPC) %>%
+  quantile(.,c(0.5,0.75,0.9,0.99))
+
+nZQuants <- c(0,nZQuants,max(pull(outMigData,logCumSHELDUSDmgPC),na.rm=T))
+
+```
+
+```{r}
+outMigData <- outMigData %>%
+  mutate(censored = if_else(treat=='Yes' & logCumSHELDUSDmgPC >= nZQuants[2],T,F),
+         individualsCensored = if_else(censored,NA_real_,individuals),
+         countyID = paste(originName,origin))
+```
+
+```{r}
+
+hyper.bym <- list(theta1 = list('PCprior', c(1, 0.01)), theta2 = list('PCprior', c(0.5, 0.5)))
+hyper.iid <- list(theta = list(prior="pc.prec", param=c(1, 0.01)))
+
+# Under Poisson uses default set up
+control.family=inla.set.control.family.default()
+
+formula <- "individualsCensored ~ 1 + offset(log(pop)) + as.factor(year) +
+                           f(FIPSID, model='bym2', hyper = hyper.bym,
+                             graph = inla.graph, scale.model = T) +
+                           f(yearID2,model='rw1',hyper=hyper.iid,
+                             scale.model=T,replicate=FIPSID2)" 
+
+```
+
+```{r}
+
+fit.inla <- function(data,group,formula) {
+  print(group)
+  model <- inla(as.formula(formula),
+         data=data,
+         family = 'poisson',
+         num.threads = round(parallel::detectCores()*0.7),
+         control.family=control.family,
+         control.compute=list(config = TRUE,dic = TRUE, waic = TRUE),
+         control.predictor = list(link=1))
+  
+  return(model) 
+  
+}
+
+```
+
+```{r}
+
+byRisk <- outMigData %>% 
+  group_by(destination) %>% 
+  nest()
+
+```
+
+```{r}
+
+models <- map2(byRisk$data,byRisk$destination,fit.inla,formula = formula)
+
+```
+
+```{r}
+extract.predictions <- function(sim) {
+  n.sim = length(sim)
+  
+  model.names <- row.names(sim[[1]]$latent)
+  y.names <- grep("Predictor", model.names)
+  
+  rate.draws <- sapply(sim, function(x) exp(x$latent[y.names]))
+  mig.draws <- t(apply(rate.draws,M=1,function(x) rpois(n.sim,x)))
+  
+  return(mig.draws)
+}
+
+compute_summary <- function(migDraws,data) {
+  
+  migObserved <- pull(data,individuals)
+  
+  excMig <- migObserved-migDraws
+  relExc <- excMig/migDraws
+  
+  migMean <- apply(migDraws,M=1,function(x) mean(x))
+  migMed <- apply(migDraws,M=1,function(x) quantile(x,0.5))
+  migUp <- apply(migDraws,M=1,function(x) quantile(x,0.9))
+  migLow <- apply(migDraws,M=1,function(x) quantile(x,0.1))
+  excMean <- apply(excMig,M=1,function(x) mean(x))
+  excMed <- apply(excMig,M=1,function(x) quantile(x,0.5))
+  excUp <- apply(excMig,M=1,function(x) quantile(x,0.9))
+  excLow <- apply(excMig,M=1,function(x) quantile(x,0.1))
+  relExcMean <- apply(relExc,M=1,function(x) mean(x))
+  relExcMed <- apply(relExc,M=1,function(x) quantile(x,0.5))
+  relExcUp <- apply(relExc,M=1,function(x) quantile(x,0.9))
+  relExcLow <- apply(relExc,M=1,function(x) quantile(x,0.1))
+  probPositive <- apply(excMig,M=1,function(x) sum(x>0)/length(x))
+  probNegative <- 1-probPositive
+  
+  return(list('observed'=migObserved,
+              'migMean'=migMean,'migLow'=migLow,'migMed'=migMed,'migUp'=migUp,
+              'excMean'=excMean,'excLow'=excLow,'excMed'=excMed,'excUp'=excUp,
+              'relExcMean'=relExcMean,'relExcLow'=relExcLow,'relExcMed'=relExcMed,'relExcUp'=relExcUp,
+              'probPos'=probPositive,'probNeg'=probNegative))
+}
+```
+
+```{r}
+n.sim <- 1000
+
+simsOut <- map(models, inla.posterior.sample, n=n.sim)
+migDrawsOut <- map(simsOut, extract.predictions)
+summariesOut <- map2(migDrawsOut,byRisk$data,compute_summary)
+
+names(simsOut) <- byRisk$destination
+names(summariesOut) <- byRisk$destination
+```
+
+```{r}
+
+graphData <- outMigData %>%
+  filter(destination=='risk3') %>%
+  arrange(origin) %>%
+  group_by(origin) %>%
+  mutate(FIPSID = cur_group_id()) %>%
+  ungroup() %>%
+  rename(FIPSCode = origin) %>%
+  mutate(predMigMed = summariesOut$risk3$migMed,
+         predMigUp = summariesOut$risk3$migUp,
+         predMigLow = summariesOut$risk3$migLow) %>%
+  select(countyID,FIPSID,year,treat,censored,
+         individuals,individualsCensored,pop,
+         predMigMed:predMigLow)
+
+```
+
+```{r}
+
+counties <- unique(graphData$countyID)
+
+graphData %>%
+  filter(countyID %in% sample(counties,6)) %>%
+ggplot() +
+  geom_point(mapping=aes(x=year,y=individuals/pop,shape=censored,color=treat)) +
+  geom_line(mapping=aes(x=year,y=predMigMed/pop,color='Expected')) +
+  geom_ribbon(mapping=aes(x=year,ymin=predMigLow/pop,ymax=predMigUp/pop,fill='Expected'),
+              alpha=0.3) +
+  facet_wrap(~countyID)
+  
+```
+
+```{r}
+damageQuantiles <- quantile(exp(pull(outMigData,logCumSHELDUSDmgPC)),
+                            c(0,0.25,0.5,0.75,0.9,0.95,1))
+
+NFIPQuantiles <- quantile(exp(pull(outMigData,logCumNFIPPC)),
+                          c(0,0.25,0.5,0.75,0.9,0.95,1))
+
+assistanceQuantiles <- quantile(exp(pull(outMigData,logCumAssistancePC)),
+                                c(0,0.25,0.5,0.75,0.9,0.95,1),
+                                na.rm = T)
+
+outMigData <- outMigData %>% 
+  select(-c(FIPSID:yearID3)) %>%
+  relocate(individuals:individualsImp,.after=pop) %>%
+  relocate(censored:individualsCensored,.after=pop) %>%
+  mutate(damageQuants = factor(cut(exp(logCumSHELDUSDmgPC),damageQuantiles,labels=F)),
+         NFIPQuants = factor(cut(exp(logCumNFIPPC),NFIPQuantiles,labels=F)),
+         assistanceQuants = factor(cut(exp(logCumAssistancePC),assistanceQuantiles,labels=F)),
+         popQuants = factor(ntile(logPopCensus,5)),
+         densityQuants = factor(ntile(logPopDensity,5)),
+         pctBlackQuants = factor(ntile(pctBlack,5)),
+         pctWhiteQuants = factor(ntile(pctWhite,5)),
+         pctOldQuants = factor(ntile(pctOld,5)),
+         socioEconQuants = factor(ntile(socioEcon,5)),
+         houseCompQuants = factor(ntile(houseComp,5)),
+         minorityStatQuants = factor(ntile(minorityStat,5)),
+         housignQuants = factor(ntile(housing,5)),
+         SVIQuants = factor(ntile(SVI,5)))
+
+save(outMigData,file=here(outDir,'outMigDataModelReady.RData'))
+```
+
+```{r}
+save(simsOut,file=here('secondYearPaper','R','RObjects','simsOut.RData'))
+save(migDrawsOut,file=here('secondYearPaper','R','RObjects','migDrawsOut.RData'))
+save(summariesOut,file=here('secondYearPaper','R','RObjects','summariesOut.RData'))
+```
+

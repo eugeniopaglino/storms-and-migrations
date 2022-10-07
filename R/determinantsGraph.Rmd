@@ -1,0 +1,222 @@
+---
+title: "Determinants of Excess Migration"
+author: "Eugenio Paglino"
+date: \today
+output: pdf_document
+---
+
+```{r, echo=F, message=F,warning=F}
+# Loading necessary packages
+
+library(magrittr)
+library(lme4)
+library(here)
+library(patchwork)
+library(tidyverse)
+```
+
+```{r}
+rm(list=ls())
+
+i_am('secondYearPaper/R/determinants.Rmd')
+
+inDir <- here('data','input')
+outDir <- here('secondYearPaper','data','output')
+figuresDir <- here('secondYearPaper','figuresBayes')
+tablesDir <- here('secondYearPaper','tables')
+```
+
+```{r}
+summaryTableMult <- read_csv(here(outDir,'summaryTableMult.csv'))
+```
+
+```{r}
+clean_coef_names <- function(coefName) {
+  variable <- str_extract(coefName,'\\w+(?=Quants)')
+  variableComponents <- str_match(variable,'([a-z]+)([A-Z]?[a-z]*)|([A-Z]+)')[1,-1]
+  variableComponents <- variableComponents[!is.na(variableComponents)]
+  variableComponents <- ifelse(variableComponents==str_to_upper(variableComponents),
+                               variableComponents,
+                               str_to_title(variableComponents))
+  variableName <- paste(variableComponents,collapse = ' ')
+  cleanCoefName <- paste(variableName,'Percentiles',sep='\n')
+  return(cleanCoefName)
+}
+```
+
+```{r}
+summaryTableMult <- summaryTableMult %>%
+  mutate(coefNum = factor(if_else(!(coef %in% c('damageQuants','NFIPQuants','assistanceQuants')),
+                                 case_when(coefNum == 1 ~ '<20th',
+                                           coefNum == 2 ~ '20-40th',
+                                           coefNum == 3 ~ '40-60th',
+                                           coefNum == 4 ~ '60-80th',
+                                           coefNum == 5 ~ '>80th'),
+                                 case_when(coefNum == 1 ~ '<25th',
+                                           coefNum == 2 ~ '25-50th',
+                                           coefNum == 3 ~ '50-75th',
+                                           coefNum == 4 ~ '75-90th',
+                                           coefNum == 5 ~ '90-95th',
+                                           coefNum == 6 ~ '>95th')),
+                          levels=c('<20th','20-40th','40-60th','60-80th','>80th',
+                                   '<25th','25-50th','50-75th','75-90th','90-95th',
+                                   '>95th')),
+         coef = sapply(coef,clean_coef_names),
+         coef = factor(coef, 
+                       levels = c('Damage \nPercentiles',
+                                  'NFIP\nPercentiles',
+                                  'Pop \nPercentiles',
+                                  'Density \nPercentiles',
+                                  'SVI\nPercentiles',
+                                  'Pct Black\nPercentiles',
+                                  'Pct Old\nPercentiles',
+                                  'Pct White\nPercentiles')),
+         naive = if_else(naive,
+                         'Treating Excess Migration\nas Fixed',
+                         'Treating Excess Migration\nas Random')) %>%
+  rename('95% Confidence\nIntervals'=naive)
+```
+
+```{r}
+coefPlotMult <- summaryTableMult %>%
+  ggplot() +
+  geom_vline(xintercept = 0) +
+  geom_errorbarh(mapping=aes(xmin=est-(1.96*se),xmax=est+(1.96*se),y=coefNum,
+                             color=`95% Confidence\nIntervals`),
+                 height=1) + 
+  coord_cartesian(xlim=c(-500,2250)) + 
+  scale_x_continuous(breaks=seq(-500,2000,500)) + 
+  facet_grid(coef~type,switch = 'y',scales = 'free_y', space = 'free_y') +
+  labs(title='Multivariate Analysis',
+       x='Expected Change in the Number of Excess Migrants\nCompared to Base Level',
+       y='') + 
+  scale_color_manual(values=c('black','red')) +
+  theme_minimal() +
+  theme(strip.text.y.left = element_text(angle=0),
+        strip.placement = 'outside',
+        legend.position = 'bottom',
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank())
+coefPlotMult
+```
+
+```{r}
+summaryTableUniv <- read_csv(here(outDir,'summaryTableUniv.csv'))
+```
+
+```{r}
+summaryTableUniv <- summaryTableUniv %>%
+  mutate(coefNum = factor(if_else(!(coef %in% c('damageQuants','NFIPQuants','assistanceQuants')),
+                                 case_when(coefNum == 1 ~ '<20th',
+                                           coefNum == 2 ~ '20-40th',
+                                           coefNum == 3 ~ '40-60th',
+                                           coefNum == 4 ~ '60-80th',
+                                           coefNum == 5 ~ '>80th'),
+                                 case_when(coefNum == 1 ~ '<25th',
+                                           coefNum == 2 ~ '25-50th',
+                                           coefNum == 3 ~ '50-75th',
+                                           coefNum == 4 ~ '75-90th',
+                                           coefNum == 5 ~ '90-95th',
+                                           coefNum == 6 ~ '95-99th',
+                                           coefNum == 7 ~ '>99th')),
+                          levels=c('<20th','20-40th','40-60th','60-80th','>80th',
+                                   '<25th','25-50th','50-75th','75-90th','90-95th',
+                                   '95-99th','>99th')),
+         coef = sapply(coef,clean_coef_names),
+         coef = factor(coef, 
+                       levels = c('Damage \nPercentiles',
+                                  'NFIP\nPercentiles',
+                                  'Assistance \nPercentiles',
+                                  'Pop \nPercentiles',
+                                  'Density \nPercentiles',
+                                  'SVI\nPercentiles',
+                                  'Pct Black\nPercentiles',
+                                  'Pct Old\nPercentiles',
+                                  'Pct White\nPercentiles')),
+         naive = if_else(naive,
+                         'Treating Excess Migration\nas Fixed',
+                         'Treating Excess Migration\nas Random')) %>%
+  rename('95% Confidence\nIntervals'=naive)
+```
+
+```{r}
+coefPlotUniv <- summaryTableUniv %>%
+  ggplot() +
+  geom_vline(xintercept = 0) +
+  geom_errorbarh(mapping=aes(xmin=est-(1.96*se),xmax=est+(1.96*se),y=coefNum,
+                             color=`95% Confidence\nIntervals`),
+                 height=1) + 
+  facet_grid(coef~type,switch = 'y',scales = 'free_y', space = 'free_y') +
+  labs(title='Univariate Analysis',
+       x='',
+       y='') + 
+  scale_color_manual(values=c('black','red')) +
+  theme_minimal() +
+  theme(strip.text.y.left = element_text(angle=0),
+        strip.placement = 'outside',
+        legend.position = 'bottom',
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank())
+coefPlotUniv
+```
+
+```{r}
+pdf(here(figuresDir,'coefPlots.pdf'), width = 8, height = 14)
+coefPlotUniv / coefPlotMult + plot_layout(guides='collect') &
+  theme(legend.position = 'bottom')
+dev.off()
+```
+
+```{r}
+summaryTableMultInt <- read_csv(here(outDir,'summaryTableMultInt.csv'))
+```
+
+```{r}
+summaryTableMultInt <- summaryTableMultInt %>%
+  mutate(coefNum = if_else(is.na(coefNum),1,coefNum)) %>%
+  group_by(intVar,type) %>%
+  mutate(baseline = if_else(row_number() == 1,est,NA_real_)) %>%
+  ungroup() %>%
+  fill(baseline) %>%
+  mutate(finalEst=if_else(coefNum==1,est/10,(est+baseline)/10))
+```
+
+```{r}
+summaryTableMultInt <- summaryTableMultInt %>%
+  mutate(coefNum = factor(case_when(coefNum == 1 ~ '<20th',
+                                    coefNum == 2 ~ '20-40th',
+                                    coefNum == 3 ~ '40-60th',
+                                    coefNum == 4 ~ '60-80th',
+                                    coefNum == 5 ~ '>80th'),
+                          levels=c('<20th','20-40th','40-60th','60-80th','>80th',
+                                   '<25th','25-50th','50-75th','75-90th','90-95th',
+                                   '>95th')),
+         intVar = case_when(intVar == 'pctWhite' ~ 'Pct. White\nPercentiles',
+                            intVar == 'pctBlack' ~ 'Pct. Black\nPercentiles',
+                            intVar == 'SVI' ~ 'SVI\nPercentiles'))
+```
+
+```{r}
+coefPlotMultInt <- summaryTableMultInt %>%
+  ggplot() +
+  geom_vline(xintercept = 0) +
+  geom_errorbarh(mapping=aes(xmin=finalEst-(1.96*se/10),xmax=finalEst+(1.96*se/10),y=coefNum),
+                 height=0.5) + 
+  facet_grid(intVar~type,switch = 'y',scales = 'free_y', space = 'free_y') +
+  labs(x='Expected Change in the Number of Excess Migrants\nfor a 10% increase in Per Capita Damage',
+       y='') + 
+  theme_minimal() +
+  theme(strip.text.y.left = element_text(angle=0),
+        strip.placement = 'outside',
+        legend.position = 'bottom',
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor.y = element_blank())
+coefPlotMultInt
+```
+
+
+```{r}
+pdf(here(figuresDir,'coefPlotMultInt.pdf'), width = 8, height = 4)
+coefPlotMultInt
+dev.off()
+```

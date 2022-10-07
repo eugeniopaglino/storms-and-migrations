@@ -1,0 +1,336 @@
+---
+title: "Summary Table"
+author: "Eugenio Paglino"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F,
+                      message = F,
+                      warning = F)
+```
+
+```{r}
+# Loading necessary packages
+
+library(here)
+library(gt)
+library(tidyverse)
+```
+
+```{r}
+rm(list=ls())
+
+i_am('secondYearPaper/R/summaryTable.Rmd')
+
+inDir <- here('data','input')
+outDir <- here('secondYearPaper','data','output')
+figuresDir <- here('secondYearPaper','figuresBayes')
+tablesDir <- here('secondYearPaper','tables')
+```
+
+```{r}
+load(here('secondYearPaper','R','RObjects','simulationsDF.RData'))
+```
+
+```{r}
+simulationsDF <- simulationsDF %>%
+  mutate(across(V1:V1000, ~ individuals-.x))
+```
+
+```{r}
+totalStatsIO <- simulationsDF %>%
+  filter(riskLevel=='anyRisk') %>%
+  group_by(type) %>%
+  summarise(across(V1:V1000, ~ sum(.x))) %>%
+  ungroup() %>%
+  rowwise() %>%
+  mutate(excMigMed = quantile(c_across(V1:V1000),0.5),
+         excMigLow = quantile(c_across(V1:V1000),0.1),
+         excMigUp = quantile(c_across(V1:V1000),0.9)) %>%
+  ungroup() %>%
+  select(-c(V1:V1000)) %>%
+  pivot_wider(values_from = excMigMed:excMigUp, names_from = type)
+```
+
+```{r}
+stateStatsIO <- simulationsDF %>%
+  filter(riskLevel=='anyRisk') %>%
+  group_by(type,state) %>%
+  summarise(across(V1:V1000, ~ sum(.x))) %>%
+  ungroup() %>%
+  rowwise() %>%
+  mutate(excMigMed = quantile(c_across(V1:V1000),0.5),
+         excMigLow = quantile(c_across(V1:V1000),0.1),
+         excMigUp = quantile(c_across(V1:V1000),0.9)) %>%
+  ungroup() %>%
+  select(-c(V1:V1000)) %>%
+  pivot_wider(values_from = excMigMed:excMigUp, names_from = type)
+```
+
+```{r}
+yearStatsIO <- simulationsDF %>%
+  filter(riskLevel=='anyRisk') %>%
+  group_by(type,year) %>%
+  summarise(across(V1:V1000, ~ sum(.x))) %>%
+  ungroup() %>%
+  rowwise() %>%
+  mutate(excMigMed = quantile(c_across(V1:V1000),0.5),
+         excMigLow = quantile(c_across(V1:V1000),0.1),
+         excMigUp = quantile(c_across(V1:V1000),0.9)) %>%
+  ungroup() %>%
+  select(-c(V1:V1000)) %>%
+  pivot_wider(values_from = excMigMed:excMigUp, names_from = type)
+```
+
+```{r}
+stateYearStatsIO <- simulationsDF %>%
+  filter(riskLevel=='anyRisk') %>%
+  group_by(type,state,year) %>%
+  summarise(across(V1:V1000, ~ sum(.x))) %>%
+  ungroup() %>%
+  rowwise() %>%
+  mutate(excMigMed = quantile(c_across(V1:V1000),0.5),
+         excMigLow = quantile(c_across(V1:V1000),0.1),
+         excMigUp = quantile(c_across(V1:V1000),0.9)) %>%
+  ungroup() %>%
+  select(-c(V1:V1000)) %>%
+  pivot_wider(values_from = excMigMed:excMigUp, names_from = type)
+```
+
+```{r}
+totalStatsNet <- simulationsDF %>%
+  filter(riskLevel=='anyRisk') %>%
+  mutate(across(V1:V1000, ~ if_else(type=='Out',-.x,.x))) %>%
+  summarise(across(V1:V1000, ~ sum(.x))) %>%
+  rowwise() %>%
+  mutate(excMigMed_Net = quantile(c_across(V1:V1000),0.5),
+         excMigLow_Net = quantile(c_across(V1:V1000),0.1),
+         excMigUp_Net = quantile(c_across(V1:V1000),0.9)) %>%
+  ungroup() %>%
+  select(-c(V1:V1000))
+```
+
+```{r}
+stateStatsNet <- simulationsDF %>%
+  filter(riskLevel=='anyRisk') %>%
+  mutate(across(V1:V1000, ~ if_else(type=='Out',-.x,.x))) %>%
+  group_by(state) %>%
+  summarise(across(V1:V1000, ~ sum(.x))) %>%
+  ungroup() %>%
+  rowwise() %>%
+  mutate(excMigMed_Net = quantile(c_across(V1:V1000),0.5),
+         excMigLow_Net = quantile(c_across(V1:V1000),0.1),
+         excMigUp_Net = quantile(c_across(V1:V1000),0.9)) %>%
+  ungroup() %>%
+  select(-c(V1:V1000))
+```
+
+```{r}
+yearStatsNet <- simulationsDF %>%
+  filter(riskLevel=='anyRisk') %>%
+  mutate(across(V1:V1000, ~ if_else(type=='Out',-.x,.x))) %>%
+  group_by(year) %>%
+  summarise(across(V1:V1000, ~ sum(.x))) %>%
+  ungroup() %>%
+  rowwise() %>%
+  mutate(excMigMed_Net = quantile(c_across(V1:V1000),0.5),
+         excMigLow_Net = quantile(c_across(V1:V1000),0.1),
+         excMigUp_Net = quantile(c_across(V1:V1000),0.9)) %>%
+  ungroup() %>%
+  select(-c(V1:V1000))
+```
+
+```{r}
+stateYearStatsNet <- simulationsDF %>%
+  filter(riskLevel=='anyRisk') %>%
+  mutate(across(V1:V1000, ~ if_else(type=='Out',-.x,.x))) %>%
+  group_by(state,year) %>%
+  summarise(across(V1:V1000, ~ sum(.x))) %>%
+  ungroup() %>%
+  rowwise() %>%
+  mutate(excMigMed_Net = quantile(c_across(V1:V1000),0.5),
+         excMigLow_Net = quantile(c_across(V1:V1000),0.1),
+         excMigUp_Net = quantile(c_across(V1:V1000),0.9)) %>%
+  ungroup() %>%
+  select(-c(V1:V1000))
+```
+
+```{r}
+stateYearStats <- stateYearStatsIO %>%
+  left_join(stateYearStatsNet,by=c('state','year')) %>%
+  mutate(year = as.character(year))
+
+yearStats <- yearStatsIO %>%
+  left_join(yearStatsNet,by=c('year')) %>%
+  mutate(year = as.character(year),
+         state='Total') 
+
+stateStats <- stateStatsIO %>%
+  left_join(stateStatsNet,by=c('state')) %>%
+  mutate(year='Total')
+
+totalStats <- totalStatsIO %>%
+  add_column(totalStatsNet) %>%
+  mutate(year='Total',state='Total')
+```
+
+```{r}
+summaryTable <- stateYearStats %>%
+  add_row(yearStats) %>%
+  add_row(stateStats) %>%
+  add_row(totalStats)
+```
+
+```{r}
+summaryTable %>%
+  filter(state=='Total') %>%
+  select(-state) %>%
+  gt() %>%
+  cols_label(
+    year = 'Year',
+    excMigMed_In = 'Median',
+    excMigMed_Out = 'Median',
+    excMigLow_In = '10th Percentile',
+    excMigLow_Out = '10th Percentile',
+    excMigUp_In = '90th Percentile',
+    excMigUp_Out = '90th Percentile',
+    excMigMed_Net = 'Median',
+    excMigLow_Net = '10th Percentile',
+    excMigUp_Net = '90th Percentile') %>%
+  fmt_number(
+    columns = excMigMed_In:excMigUp_Net,
+    decimals = 0
+  ) %>%
+  tab_spanner(
+    label = 'Excess In-Migrants',
+    columns = c(excMigMed_In,excMigLow_In,excMigUp_In)
+  ) %>%
+  tab_spanner(
+    label = 'Excess Out-Migrants',
+    columns = c(excMigMed_Out,excMigLow_Out,excMigUp_Out)
+  ) %>%
+  tab_spanner(
+    label = 'Excess Migrants (Net)',
+    columns = c(excMigMed_Net,excMigLow_Net,excMigUp_Net)
+  ) %>%
+  tab_style(
+    style = list(
+      cell_text(weight = "bold")
+      ),
+    locations = cells_body(
+      columns = year,
+      rows = year == 'Total'
+    )
+  ) %>%  
+  tab_header(
+    title = md("Excess Migration by Year"),
+  ) %>%
+  tab_options(table.font.size = '90%',
+              data_row.padding = px(1),
+              row_group.padding = px(2)) %>%
+  gt::gtsave(filename = here(figuresDir,"summaryTableByYear.png"),
+             vwidth = 1200,vheight = 1000,zoom=4)
+```
+
+```{r}
+summaryTable %>%
+  filter(year=='Total') %>%
+  select(-year) %>%
+  gt() %>%
+  cols_label(
+    state = 'State',
+    excMigMed_In = 'Median',
+    excMigMed_Out = 'Median',
+    excMigLow_In = '10th Percentile',
+    excMigLow_Out = '10th Percentile',
+    excMigUp_In = '90th Percentile',
+    excMigUp_Out = '90th Percentile',
+    excMigMed_Net = 'Median',
+    excMigLow_Net = '10th Percentile',
+    excMigUp_Net = '90th Percentile') %>%
+  fmt_number(
+    columns = excMigMed_In:excMigUp_Net,
+    decimals = 0
+  ) %>%
+  tab_spanner(
+    label = 'Excess In-Migrants',
+    columns = c(excMigMed_In,excMigLow_In,excMigUp_In)
+  ) %>%
+  tab_spanner(
+    label = 'Excess Out-Migrants',
+    columns = c(excMigMed_Out,excMigLow_Out,excMigUp_Out)
+  ) %>%
+  tab_spanner(
+    label = 'Excess Migrants (Net)',
+    columns = c(excMigMed_Net,excMigLow_Net,excMigUp_Net)
+  ) %>%
+  tab_style(
+    style = list(
+      cell_text(weight = "bold")
+      ),
+    locations = cells_body(
+      columns = state,
+      rows = state == 'Total'
+    )
+  ) %>%  
+  tab_header(
+    title = md("Excess Migration by State"),
+  ) %>%
+  tab_options(table.font.size = '90%',
+              data_row.padding = px(1),
+              row_group.padding = px(2)) %>%
+  gt::gtsave(filename = here(figuresDir,"summaryTableByState.png"),
+             vwidth = 1200,vheight = 1000,zoom=4)
+```
+
+```{r}
+summaryTable %>%
+  group_by(state) %>%
+  gt() %>%
+  cols_label(
+    state = 'State',
+    year = 'Year',
+    excMigMed_In = 'Median',
+    excMigMed_Out = 'Median',
+    excMigLow_In = '10th Percentile',
+    excMigLow_Out = '10th Percentile',
+    excMigUp_In = '90th Percentile',
+    excMigUp_Out = '90th Percentile',
+    excMigMed_Net = 'Median',
+    excMigLow_Net = '10th Percentile',
+    excMigUp_Net = '90th Percentile') %>%
+  fmt_number(
+    columns = excMigMed_In:excMigUp_Net,
+    decimals = 0
+  ) %>%
+  tab_spanner(
+    label = 'Excess In-Migrants',
+    columns = c(excMigMed_In,excMigLow_In,excMigUp_In)
+  ) %>%
+  tab_spanner(
+    label = 'Excess Out-Migrants',
+    columns = c(excMigMed_Out,excMigLow_Out,excMigUp_Out)
+  ) %>%
+  tab_spanner(
+    label = 'Excess Migrants (Net)',
+    columns = c(excMigMed_Net,excMigLow_Net,excMigUp_Net)
+  ) %>%
+  tab_style(
+    style = list(
+      cell_text(weight = "bold")
+      ),
+    locations = cells_body(
+      columns = year,
+      rows = year == 'Total'
+    )
+  ) %>%  
+  tab_header(
+    title = md("Excess Migration by State and Year"),
+  ) %>%
+  tab_options(table.font.size = '90%',
+              row_group.font.size = '120%',
+              data_row.padding = px(1),
+              row_group.padding = px(4))
+```
+

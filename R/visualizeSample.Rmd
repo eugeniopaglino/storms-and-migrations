@@ -1,0 +1,113 @@
+---
+title: "Viasualize Sample"
+author: "Eugenio Paglino"
+date: \today
+output: pdf_document
+---
+
+```{r, echo=F, message=F,warning=F}
+# Loading necessary packages
+
+library(USAboundaries)
+library(sf)
+library(lubridate)
+library(here)
+library(scico)
+library(ggthemes)
+library(patchwork)
+library(tidyverse)
+```
+
+```{r}
+rm(list=ls())
+
+i_am('secondYearPaper/R/visualizeSample.Rmd')
+
+inDir <- here('data','input')
+outDir <- here('secondYearPaper','data','output')
+figuresDir <- here('secondYearPaper','figuresBayes')
+tablesDir <- here('secondYearPaper','tables')
+```
+
+```{r}
+damageData <- arrow::read_feather(here('data','output','dmgAssistanceData.feather'))
+load(here(outDir,'outMigDataModelReady.RData'))
+```
+
+```{r}
+damageData <- damageData %>%
+  group_by(FIPSCode) %>%
+  summarise(SHELDUSDmgPC = sum(SHELDUSDmgPC,na.rm = T),
+            riskCat = unique(riskCat)) %>%
+  ungroup() %>%
+  mutate(coastal = if_else(FIPSCode %in% unique(pull(outMigData,origin)),1,0),
+         coastal = if_else(FIPSCode %in% c('12055','48261','48505',
+                                           '22003','37079','23003',
+                                           '23021'),1,coastal))
+```
+
+```{r}
+counties <- us_counties()
+# Transform to Albers for making map of US
+counties <- st_transform(counties, 5070)
+
+counties <- counties %>%
+  select(geoid,stusps,geometry) %>%
+  filter(stusps != 'PR') %>%
+  select(-stusps) %>%
+  rename(FIPSCode = geoid) 
+```
+
+```{r}
+damageData <- counties %>%
+  right_join(damageData,by='FIPSCode')
+```
+
+```{r, fig.height=5,fig.width=5}
+riskMap <- damageData %>%
+  filter(coastal==0) %>%
+  ggplot() + 
+  geom_sf(mapping=aes(fill = as.factor(riskCat)),
+          color='black',size=0.1) +
+  scale_fill_manual(values=paletteer::paletteer_c('scico::lajolla',n=6),
+                    labels=c('1st','2nd','3rd','4th','5th')) + 
+  labs(fill='Quintile of\nPer Capita Damage\nfrom Natural Disasters\n(Risk Level)') +
+  theme_map() +
+  theme(legend.position = 'bottom') +
+  guides(fill=guide_legend(nrow=2,ncol=3,byrow=T,
+                           override.aes=aes(color='black',size=0.1)))
+
+sampleMap <- damageData %>%
+  filter(coastal==1) %>%
+  ggplot() + 
+  geom_sf(mapping=aes(fill = as.factor(riskCat)),
+          color='black',size=0.1) +
+  scale_fill_manual(values=paletteer::paletteer_c('scico::lajolla',n=6),
+                    labels=c('1st','2nd','3rd','4th','5th')) + 
+  labs(fill='Quintile of\nPer Capita Damage\nfrom Natural Disasters\n(Risk Level)') +
+  theme_map() +
+  theme(legend.position = 'bottom') +
+  guides(fill=guide_legend(nrow=2,ncol=3,byrow=T,
+                           override.aes=aes(color='black',size=0.1)))
+```
+
+```{r}
+layout <- c(
+  area(t = 1.5, l = 1, b = 4, r = 4),
+  area(t = 2, l = 3, b = 4, r = 5)
+)
+
+riskMap + sampleMap + 
+  plot_layout(design = layout,guides = 'collect') & 
+  theme(legend.position = 'bottom')
+```
+```{r}
+pdf(here::here(figuresDir,'sampleMap.pdf'), height = 6, width =8)
+
+riskMap + sampleMap + 
+  plot_layout(design = layout,guides = 'collect') & 
+  theme(legend.position = 'bottom')
+
+dev.off()
+```
+

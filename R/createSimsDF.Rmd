@@ -1,0 +1,168 @@
+---
+title: "Create Simulations Dataset"
+author: "Eugenio Paglino"
+output: html_document
+---
+
+```{r,}
+# Loading necessary packages
+library(lubridate)
+library(here)
+library(tidyverse)
+```
+
+```{r}
+rm(list=ls())
+
+here::i_am('secondYearPaper/R/createSimsDF.Rmd')
+
+inDir <- here('data','input')
+outDir <- here('secondYearPaper','data','output')
+figuresDir <- here('secondYearPaper','figuresBayes')
+tablesDir <- here('secondYearPaper','tables')
+```
+
+```{r}
+load(here('secondYearPaper','R','RObjects','migDrawsOut.RData'))
+load(here(outDir,'outMigDataModelReady.RData'))
+```
+
+```{r}
+outMigData <- outMigData %>%
+  mutate(type='Out') %>%
+  rename(FIPSCode=origin,
+         riskLevel=destination) %>%
+  arrange(riskLevel,FIPSCode,year)
+```
+
+```{r}
+migDrawsOut <- do.call(rbind,migDrawsOut)
+```
+
+```{r}
+simulationsDFOut <- as_tibble(migDrawsOut)
+
+simulationsDFOut <- simulationsDFOut %>% 
+  mutate(year = outMigData %>% pull(year),
+         FIPSCode = outMigData %>% pull(FIPSCode),
+         riskLevel = outMigData %>% pull(riskLevel)) %>%
+  relocate(year,FIPSCode,riskLevel)
+rm(migDrawsOut)
+```
+
+```{r}
+simulationsDFOut <- simulationsDFOut %>%
+  left_join(outMigData,by=c('FIPSCode','year','riskLevel'))
+```
+
+```{r}
+load(here('secondYearPaper','R','RObjects','migDrawsIn.RData'))
+load(here(outDir,'inMigDataModelReady.RData'))
+```
+
+```{r}
+inMigData <- inMigData %>%
+  mutate(type='In')  %>%
+  rename(FIPSCode=destination,
+         riskLevel=origin) %>%
+  arrange(riskLevel,FIPSCode,year)
+```
+
+```{r}
+migDrawsIn <- do.call(rbind,migDrawsIn)
+```
+
+```{r}
+simulationsDFIn <- as_tibble(migDrawsIn)
+
+simulationsDFIn <- simulationsDFIn %>% 
+  mutate(year = outMigData %>% pull(year),
+         FIPSCode = outMigData %>% pull(FIPSCode),
+         riskLevel = outMigData %>% pull(riskLevel)) %>%
+  relocate(year,FIPSCode,riskLevel)
+rm(migDrawsIn)
+```
+
+```{r}
+simulationsDFIn <- simulationsDFIn %>%
+  left_join(inMigData,by=c('FIPSCode','year','riskLevel'))
+```
+
+```{r}
+simulationsDF <- bind_rows(simulationsDFOut,simulationsDFIn) %>%
+  relocate(year,FIPSCode,riskLevel,type)
+rm(simulationsDFOut)
+rm(simulationsDFIn)
+```
+
+```{r, echo=FALSE, warning=F, message=F}
+## States
+states <- read_csv(here::here(inDir,'utilities','states.csv'))
+
+simulationsDF <- simulationsDF %>%
+  mutate(stateFIPS = str_sub(FIPSCode,1,2)) %>%
+  left_join(states, by = 'stateFIPS')
+```
+
+```{r, echo=FALSE, warning=F, message=F}
+## Metropolitan status
+metro <- read_csv(here::here(inDir,'utilities','FIPSmetroregion4cat.csv'))
+metro <- metro %>%
+  select(FIPSCode = fips,
+         metroCat = metroname) %>%
+  mutate(FIPSCode = if_else(nchar(FIPSCode)<5,paste0('0',FIPSCode),as.character(FIPSCode)),
+         metroCat = case_when(metroCat == 'Nonmetro' ~ 'Non Metro',
+                              metroCat == 'Md/Sm metro' ~ 'Medium or Small Metro',
+                              metroCat == 'Lg fringe metro' ~ 'Large Fringe Metro' ,
+                              metroCat == 'Lg central metro' ~ 'Large Central Metro'))
+  
+simulationsDF <- simulationsDF %>%
+  left_join(metro, by = 'FIPSCode')
+```
+
+```{r, echo=FALSE, warning=F, message=F}
+addNonMetro <- c('02068','02105','02198','02230','02275','02282', 
+                 '02013','02016','02164','02270','46113','02130',
+                 '02188','02290','04012','30067')
+
+addLgFringeMetro <- c('08001','08014')
+addMdSmMetro <- c('08013','08123','51515')
+
+## fill out missing metro
+simulationsDF <- simulationsDF %>%
+  mutate(metroCat4 = case_when(FIPSCode %in% addNonMetro ~ 'Non Metro',
+                               FIPSCode %in% addLgFringeMetro ~ 'Large Fringe Metro',
+                               FIPSCode %in% addMdSmMetro ~ 'Medium or Small Metro',
+                               TRUE ~ metroCat),
+         metroCat3 = case_when(metroCat4 %in% c('Large Fringe Metro',
+                                                'Large Central Metro') ~ 'Large Metro',
+                               TRUE ~ metroCat4))
+```
+
+```{r}
+# Construct data frame of state abbreviations + divisions, plus DC
+census_divisions <- tibble(
+  state = state.name,
+  census_division = state.division,
+  census_region = state.region
+) %>%
+  add_row(
+    state = "District of Columbia",
+    census_division = "South Atlantic",
+    census_region = "South"
+  )
+```
+
+```{r}
+simulationsDF <- simulationsDF %>% 
+  left_join(census_divisions,by='state')
+```
+
+```{r}
+simulationsDF <- simulationsDF %>% 
+  relocate(V1:V1000,.after = last_col())
+```
+
+```{r}
+save(simulationsDF,file=here('secondYearPaper','R','RObjects','simulationsDF.RData'))
+```

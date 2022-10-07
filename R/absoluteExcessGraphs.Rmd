@@ -1,0 +1,262 @@
+---
+title: "Absolute Excess Graphs"
+author: "Eugenio Paglino"
+input: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r,echo=FALSE}
+library(here)
+library(patchwork)
+library(gtsummary)
+library(tidyverse)
+```
+
+Setting the working directories.
+
+```{r,echo=FALSE}
+rm(list=ls())
+
+i_am('secondYearPaper/R/absoluteExcessGraphs.Rmd')
+
+inDir <- here('data','input')
+outDir <- here('secondYearPaper','data','output')
+figuresDir <- here('secondYearPaper','figuresBayes')
+tablesDir <- here('secondYearPaper','tables')
+```
+
+Reading the final data.
+
+```{r, echo=F, cache=T}
+load(here('secondYearPaper','R','RObjects','summariesOut.RData'))
+load(here(outDir,'outMigDataModelReady.RData'))
+load(here('secondYearPaper','R','RObjects','summariesIn.RData'))
+load(here(outDir,'inMigDataModelReady.RData'))
+```
+
+```{r}
+outMigData <- outMigData %>%
+  mutate(type='Out') %>%
+  rename(FIPSCode=origin,
+         riskLevel=destination) %>%
+  arrange(riskLevel,FIPSCode,year)
+
+inMigData <- inMigData %>%
+  mutate(type='In')  %>%
+  rename(FIPSCode=destination,
+         riskLevel=origin) %>%
+  arrange(riskLevel,FIPSCode,year)
+
+migData <- bind_rows(outMigData,inMigData)
+```
+
+```{r}
+excessData <- bind_rows(bind_rows(summariesOut),bind_rows(summariesIn)) %>% 
+  mutate(year = migData %>% pull(year),
+         FIPSCode = migData %>% pull(FIPSCode),
+         riskLevel = migData %>% pull(riskLevel),
+         type= migData %>% pull(type),
+         censored = migData %>% pull(censored)) %>%
+  relocate(FIPSCode,year,riskLevel,type)
+```
+
+```{r}
+states <- read_csv(here::here(inDir,'utilities','states.csv'))
+
+excessData <- excessData %>%
+  mutate(stateFIPS = str_sub(FIPSCode,1,2)) %>%
+  left_join(states, by = 'stateFIPS')
+```
+
+```{r}
+statesData <- excessData %>%
+  filter(riskLevel!='anyRisk') %>%
+  group_by(year,riskLevel,state,type) %>%
+  summarize(observed = sum(observed),
+            migMed = sum(migMed)) %>%
+  ungroup() %>%
+  mutate(excMig = observed - migMed,
+         relativeExc = excMig/migMed) %>%
+  ungroup()
+```
+
+```{r}
+sortedStates <- statesData %>%
+  group_by(state,year) %>%
+  summarise(excMig = sum(excMig)) %>%
+  ungroup() %>%
+  group_by(state) %>%
+  summarise(maxExcMig = max(abs(excMig))) %>%
+  ungroup() %>%
+  arrange(maxExcMig) %>%
+  pull(state)
+```
+
+```{r}
+statesData <- statesData %>%
+  mutate(state=factor(state,levels=sortedStates),
+         panel=if_else(state %in% sortedStates[1:(length(sortedStates)-3)],1,2))
+```
+
+```{r,fig.height=5,fig.width=3}
+absExcessPlotStates1 <- statesData %>%
+  filter(panel==1) %>%
+  ggplot() +
+  geom_errorbar(mapping=aes(x=year,ymin=-10,ymax=10),
+           color=NA,size=0) +
+  geom_col(mapping=aes(x=year,y=excMig/1000,fill=riskLevel),
+           color='black',size=0.1) +
+  scale_fill_brewer(palette='Greys',labels=c('1st','2nd','3rd','4th','5th')) +
+  scale_y_continuous(breaks=c(-20,-10,0,10,20)) +
+  labs(x='',
+       y='Migrants in Excess of Prediction (Thousands)',
+       fill='Quintile of\nPer Capita Damage\nfrom Natural Disasters\n(Risk Level)') +
+  facet_grid(state~type,scales = 'free_y',space='free_y') +
+  theme_bw() +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        strip.text.y = element_text(angle=0),
+        axis.text.x = element_text(angle=45,vjust = 0.5),
+        legend.position = 'bottom') +
+  guides(fill=guide_legend(nrow=2,ncol=3,byrow=T))
+
+absExcessPlotStates1
+```
+```{r,fig.height=5,fig.width=3}
+absExcessPlotStates2 <- statesData %>%
+  filter(panel==2) %>%
+  ggplot() +
+  geom_errorbar(mapping=aes(x=year,ymin=-5,ymax=5),
+           color=NA,size=0) +
+  geom_col(mapping=aes(x=year,y=excMig/1000,fill=riskLevel),
+           color='black',size=0.1) +
+  scale_fill_brewer(palette='Greys',labels=c('1st','2nd','3rd','4th','5th')) +
+  scale_y_continuous(breaks=c(-30,-10,0,10,30,60,100,150)) +
+  labs(x='',
+       y='',
+       fill='Quintile of\nPer Capita Damage\nfrom Natural Disasters\n(Risk Level)') +
+  facet_grid(state~type,scales = 'free_y',space='free_y') +
+  theme_bw() +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        axis.text.x = element_text(angle=45,vjust = 0.5),
+        legend.position = 'bottom') +
+  guides(fill=guide_legend(nrow=2,ncol=3,byrow=T))
+
+absExcessPlotStates2
+```
+
+```{r}
+absExcessPlotTotal <- excessData %>%
+  filter(riskLevel!='anyRisk') %>%
+  group_by(year,riskLevel,type) %>%
+  summarize(observed = sum(observed),
+            migMed = sum(migMed)) %>%
+  ungroup() %>%
+  mutate(excMig = observed - migMed,
+         relativeExc = excMig/migMed) %>%
+  ggplot() +
+  geom_col(mapping=aes(x=year,y=excMig/1000,fill=riskLevel),
+           color='black',size=0.1) +
+  scale_fill_brewer(palette='Greys',labels=c('1st','2nd','3rd','4th','5th')) +
+  facet_wrap(~type) + 
+  labs(x='',
+       y='',
+       fill='Quintile of\nPer Capita Damage\nfrom Natural Disasters\n(Risk Level)') +
+  theme_bw() +
+  theme(panel.grid.major.x = element_blank(),
+        panel.grid.minor.x = element_blank(),
+        legend.position = 'bottom') +
+  guides(fill=guide_legend(nrow=2,ncol=3,byrow=T))
+```
+
+```{r}
+
+pdf(here(figuresDir,'absExcessPlot.pdf'), width = 8, height = 10)
+
+(absExcessPlotStates1 + absExcessPlotStates2) / absExcessPlotTotal + 
+  plot_layout(heights=c(10, 2),guides = 'collect') &
+  theme(legend.position = 'bottom')
+
+dev.off()
+
+```
+
+```{r}
+
+compute_1st_quint <- function(data,variable,...) {
+  quantile(data[[variable]],c(0.2),na.rm=T)
+}
+
+compute_2nd_quint <- function(data,variable,...) {
+  quantile(data[[variable]],c(0.4),na.rm=T)
+}
+
+compute_median <- function(data,variable,...) {
+  quantile(data[[variable]],c(0.5),na.rm=T)
+}
+
+compute_3rd_quint <- function(data,variable,...) {
+  quantile(data[[variable]],c(0.6),na.rm=T)
+}
+
+compute_4th_quint <- function(data,variable,...) {
+  quantile(data[[variable]],c(0.8),na.rm=T)
+}
+
+compute_9th_decile <- function(data,variable,...) {
+  quantile(data[[variable]],c(0.9),na.rm=T)
+}
+
+compute_95th_percentile <- function(data,variable,...) {
+  quantile(data[[variable]],c(0.95),na.rm=T)
+}
+
+compute_percentile <- function(data,variable,percentile,...) {
+  quantile(data[[variable]],c(percentile),na.rm=T)
+}
+
+outMigData %>%
+  filter(riskLevel=='anyRisk') %>%
+  select(logCumSHELDUSDmgPC,logCumAssistancePC,logCumNFIPPC,
+         logPopCensus,logPopDensity,
+         pctOld,pctBlack,pctWhite,SVI) %>%
+  mutate(across(starts_with('log'), ~ exp(.x-1)),
+         logPopCensus = logPopCensus/1000) %>%
+  tbl_summary(
+    statistic = list(all_continuous() ~ "{mean} ({sd})"),
+    digits = all_continuous() ~ 2,
+    label = list(logCumSHELDUSDmgPC ~ "Tropical Storm Damage Per Capita in the Last 3 Years",
+                 logCumAssistancePC ~ "FEMA Assistance Per Capita in the Last 3 Years",
+                 logCumNFIPPC ~ "NFIP Payments Per Capita in the Last 3 Years",
+                 logPopCensus ~ 'Population (Thousands)',
+                 logPopDensity ~ 'Population Density (per Square Kilometer)',
+                 pctOld ~ 'Proportion Aged 65+',
+                 pctBlack ~ 'Proportion Black',
+                 pctWhite ~ 'Proportion White'),
+    missing_text = "(Missing)") %>%
+  add_stat(fns = everything() ~ compute_1st_quint) %>%
+  modify_header(add_stat_1 ~ "20th") %>%
+  add_stat(fns = everything() ~ compute_2nd_quint) %>%
+  modify_header(add_stat_2 ~ "40th") %>%
+  add_stat(fns = everything() ~ compute_median) %>%
+  modify_header(add_stat_3 ~ "50th") %>%
+  add_stat(fns = everything() ~ compute_3rd_quint) %>%
+  modify_header(add_stat_4 ~ "60th") %>%
+  add_stat(fns = everything() ~ compute_4th_quint) %>%
+  modify_header(add_stat_5 ~ "80th") %>%
+  add_stat(fns = everything() ~ compute_9th_decile) %>%
+  modify_header(add_stat_6 ~ "90th") %>%
+  add_stat(fns = everything() ~ compute_95th_percentile) %>%
+  modify_header(add_stat_7 ~ "95th") %>%
+  modify_spanning_header(
+    c("add_stat_1", "add_stat_2",'add_stat_3',
+      "add_stat_4", "add_stat_5",'add_stat_6','add_stat_7') ~ "**Percentiles**") %>%
+  as_gt() %>%
+  gt::gtsave(filename = here(figuresDir,"descriptiveStats.png"),
+             vwidth = 1200,vheight = 744,zoom=4)
+```
+

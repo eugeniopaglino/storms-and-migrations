@@ -1,0 +1,329 @@
+---
+title: "Determinants of Excess Migration"
+author: "Eugenio Paglino"
+date: \today
+output: pdf_document
+---
+
+```{r, echo=F, message=F,warning=F}
+# Loading necessary packages
+
+library(magrittr)
+library(lme4)
+library(here)
+library(rstanarm)
+library(tictoc)
+library(tidyverse)
+```
+
+```{r}
+rm(list=ls())
+
+i_am('secondYearPaper/R/determinants.Rmd')
+
+inDir <- here('data','input')
+outDir <- here('secondYearPaper','data','output')
+figuresDir <- here('secondYearPaper','figuresBayes')
+tablesDir <- here('secondYearPaper','tables')
+```
+
+```{r}
+load(here('secondYearPaper','R','RObjects','simulationsDF.RData'))
+```
+
+```{r}
+bySim <- simulationsDF %>%
+  filter(riskLevel=='anyRisk') %>%
+  select(!c(V251:V1000)) %>%
+  group_by(year) %>%
+  mutate(yearID = cur_group_id()) %>%
+  ungroup() %>%
+  group_by(FIPSCode) %>%
+  mutate(FIPSID = cur_group_id()) %>%
+  ungroup() %>%
+  pivot_longer(V1:V250,names_to = 'simNum', values_to = 'expMig') %>%
+  mutate(excMig = individuals-expMig) %>%
+  select(type,simNum,
+         excMig,damageQuants,NFIPQuants,
+         popQuants,densityQuants,
+         pctBlackQuants,pctOldQuants,pctWhiteQuants,
+         SVIQuants,assistanceQuants,
+         year,FIPSCode,yearID,FIPSID) %>%
+  group_by(type,simNum) %>% 
+  nest()
+rm(simulationsDF)
+```
+
+```{r}
+formula <- excMig ~ 1 + damageQuants + NFIPQuants +
+                    popQuants + densityQuants +
+                    pctBlackQuants + pctOldQuants + pctWhiteQuants + 
+                    SVIQuants +
+                    (1 | year) + (1 | FIPSCode)
+```
+
+```{r}
+coefTable <- map2_dfr(
+  bySim$data,bySim$type,
+  ~ tryCatch(lmer(formula,data=.x) %>%
+  summary() %$%
+  coefficients %>%
+  as.data.frame() %>%
+  rownames_to_column(var='coef') %>%
+  mutate(type=.y),
+  warning = function(w) return(NULL))
+)
+```
+
+```{r}
+coefTable <- coefTable %>%
+  filter(coef!='(Intercept)') %>%
+  rename(est=Estimate,se='Std. Error') %>%
+  select(-'t value')
+```
+
+```{r}
+compute_summary <- function(data) {
+  estimates <- data %>% pull(est)
+  ses <- data %>% pull(se)
+  sims <- rnorm(n=length(estimates),estimates,ses)
+  coefMean <- mean(sims)
+  coefSE <- sd(sims)
+  summaryDF <- tibble(est=coefMean,se=coefSE)
+  return(summaryDF)
+}
+```
+
+```{r}
+coefNames <- unique(pull(coefTable,coef))
+  
+summaryTableMultSim <- coefTable %>%
+  group_by(type,coef) %>%
+  nest() %$%
+  data %>%
+  map_dfr(.,compute_summary) %>%
+  mutate(coef=rep(coefNames,2),
+         type=rep(c('Out','In'),each=length(coefNames)),
+         naive=F)
+```
+
+```{r, echo=F, cache=T}
+load(here('secondYearPaper','R','RObjects','summariesOut.RData'))
+load(here(outDir,'outMigDataModelReady.RData'))
+load(here('secondYearPaper','R','RObjects','summariesIn.RData'))
+load(here(outDir,'inMigDataModelReady.RData'))
+```
+
+```{r}
+outMigData <- outMigData %>%
+  mutate(type='Out') %>%
+  rename(FIPSCode=origin,
+         riskLevel=destination) %>%
+  arrange(riskLevel,FIPSCode,year)
+
+inMigData <- inMigData %>%
+  mutate(type='In')  %>%
+  rename(FIPSCode=destination,
+         riskLevel=origin) %>%
+  arrange(riskLevel,FIPSCode,year)
+
+migData <- bind_rows(outMigData,inMigData)
+```
+
+```{r}
+excessData <- bind_rows(bind_rows(summariesOut),bind_rows(summariesIn)) %>% 
+  mutate(year = migData %>% pull(year),
+         FIPSCode = migData %>% pull(FIPSCode),
+         riskLevel = migData %>% pull(riskLevel),
+         type= migData %>% pull(type)) %>%
+  relocate(FIPSCode,year,riskLevel,type)
+```
+
+```{r}
+excessData <- excessData %>%
+  left_join(migData,by=c('year','FIPSCode','riskLevel','type'))
+```
+
+```{r}
+excessDataByType <- excessData %>%
+  filter(riskLevel=='anyRisk') %>%
+  rename(excMig=excMed) %>%
+  group_by(type) %>%
+  nest() 
+```
+
+```{r}
+summaryTableMult <- map2_dfr(excessDataByType$data,excessDataByType$type,
+  ~ lmer(formula,data=.x) %>%
+  summary() %>%
+  coefficients() %>%
+  as.data.frame() %>%
+  rownames_to_column(var='coef') %>%
+  mutate(type=.y)) %>%
+  filter(coef!='(Intercept)') %>%
+  rename(est=Estimate,se='Std. Error') %>%
+  select(-'t value')
+
+summaryTableMult <- summaryTableMult %>%
+  mutate(naive=T) %>%
+  bind_rows(summaryTableMultSim) %>%
+  mutate(coefNum = str_extract(coef,'\\d'),
+         coef = str_extract(coef,'[:alpha:]+'))
+```
+
+```{r}
+summaryTableMult %>% write_csv(here(outDir,'summaryTableMult.csv'))
+```
+
+```{r}
+formula <- excMig ~ 1 + logSHELDUSDmgPC*SVIQuants + NFIPQuants +
+                    popQuants + densityQuants +
+                    pctBlackQuants + pctOldQuants + pctWhiteQuants + 
+                    SVIQuants +
+                    (1 | year) + (1 | FIPSCode)
+```
+
+```{r}
+summaryTableMultIntSVI <- map2_dfr(excessDataByType$data,excessDataByType$type,
+  ~ lmer(formula,data=.x) %>%
+  summary() %>%
+  coefficients() %>%
+  as.data.frame() %>%
+  rownames_to_column(var='coef') %>%
+  mutate(type=.y)) %>%
+  filter(str_detect(coef,'Dmg')) %>%
+  rename(est=Estimate,se='Std. Error') %>%
+  select(-'t value')
+```
+
+```{r}
+formula <- excMig ~ 1 + logSHELDUSDmgPC*pctWhiteQuants + NFIPQuants +
+                    popQuants + densityQuants +
+                    pctBlackQuants + pctOldQuants +
+                    SVIQuants +
+                    (1 | year) + (1 | FIPSCode)
+```
+
+```{r}
+summaryTableMultIntPctWhite <- map2_dfr(excessDataByType$data,excessDataByType$type,
+  ~ lmer(formula,data=.x) %>%
+  summary() %>%
+  coefficients() %>%
+  as.data.frame() %>%
+  rownames_to_column(var='coef') %>%
+  mutate(type=.y)) %>%
+  filter(str_detect(coef,'Dmg')) %>%
+  rename(est=Estimate,se='Std. Error') %>%
+  select(-'t value')
+```
+
+```{r}
+formula <- excMig ~ 1 + logSHELDUSDmgPC*pctBlackQuants + NFIPQuants +
+                    popQuants + densityQuants +
+                    pctWhiteQuants + pctOldQuants +
+                    SVIQuants +
+                    (1 | year) + (1 | FIPSCode)
+```
+
+```{r}
+summaryTableMultIntPctBlack <- map2_dfr(excessDataByType$data,excessDataByType$type,
+  ~ lmer(formula,data=.x) %>%
+  summary() %>%
+  coefficients() %>%
+  as.data.frame() %>%
+  rownames_to_column(var='coef') %>%
+  mutate(type=.y)) %>%
+  filter(str_detect(coef,'Dmg')) %>%
+  rename(est=Estimate,se='Std. Error') %>%
+  select(-'t value')
+```
+
+```{r}
+summaryTableMultInt <- summaryTableMultIntSVI %>%
+  mutate(intVar = 'SVI') %>%
+  bind_rows(summaryTableMultIntPctWhite %>% mutate(intVar = 'pctWhite')) %>%
+  bind_rows(summaryTableMultIntPctBlack %>% mutate(intVar = 'pctBlack')) %>%
+  mutate(coefNum = str_extract(coef,'\\d'),
+         coef = str_extract(coef,'[:alpha:]+'))
+```
+
+```{r}
+summaryTableMultInt %>% write_csv(here(outDir,'summaryTableMultInt.csv'))
+```
+
+```{r}
+determinants <- c('damageQuants','NFIPQuants','assistanceQuants','popQuants',
+                  'densityQuants','pctBlackQuants','pctOldQuants','pctWhiteQuants',
+                  'SVIQuants')
+
+univFormulas <- sapply(determinants,
+                       function(x) as.formula(paste(c('excMig ~ 1',x,'(1 | year) + (1 | FIPSCode)'),collapse = ' + ')))
+```
+
+```{r}
+coefTable <- map2_dfr(
+  bySim$data,bySim$type,
+  function(data,type) {
+    map_dfr(univFormulas,
+    function(formula) {
+      tryCatch(
+      lmer(formula,data=data) %>%
+      summary() %$%
+      coefficients %>%
+      as.data.frame() %>%
+      rownames_to_column(var='coef') %>%
+      mutate(type=type),
+      warning = function(w) return(NULL))
+    })
+  }
+)
+```
+
+```{r}
+coefTable <- coefTable %>%
+  filter(coef!='(Intercept)') %>%
+  rename(est=Estimate,se='Std. Error') %>%
+  select(-'t value')
+```
+
+```{r}
+coefNames <- unique(pull(coefTable,coef))
+  
+summaryTableUnivSim <- coefTable %>%
+  group_by(type,coef) %>%
+  nest() %$%
+  data %>%
+  map_dfr(.,compute_summary) %>%
+  mutate(coef=rep(coefNames,2),
+         type=rep(c('Out','In'),each=length(coefNames)),
+         naive=F)
+```
+
+```{r}
+summaryTableUniv <- map2_dfr(
+  excessDataByType$data,excessDataByType$type,
+  function(data,type) {
+    map_dfr(univFormulas,
+    function(formula) {
+      lmer(formula,data=data) %>%
+      summary() %>%
+      coefficients() %>%
+      as.data.frame() %>%
+      rownames_to_column(var='coef') %>%
+      mutate(type=type)
+      }) %>%
+      filter(coef!='(Intercept)') %>%
+      rename(est=Estimate,se='Std. Error') %>%
+      select(-'t value')
+    })
+
+summaryTableUniv <- summaryTableUniv %>%
+  mutate(naive=T) %>%
+  bind_rows(summaryTableUnivSim) %>%
+  mutate(coefNum = str_extract(coef,'\\d'),
+         coef = str_extract(coef,'[:alpha:]+'))
+```
+
+```{r}
+summaryTableUniv %>% write_csv(here(outDir,'summaryTableUniv.csv'))
+```

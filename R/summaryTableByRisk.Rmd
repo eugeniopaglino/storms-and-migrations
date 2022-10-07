@@ -1,0 +1,177 @@
+---
+title: "Summary Table"
+author: "Eugenio Paglino"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F,
+                      message = F,
+                      warning = F)
+```
+
+```{r}
+# Loading necessary packages
+
+library(here)
+library(gt)
+library(tidyverse)
+```
+
+```{r}
+rm(list=ls())
+
+i_am('secondYearPaper/R/summaryTable.Rmd')
+
+inDir <- here('data','input')
+outDir <- here('secondYearPaper','data','output')
+figuresDir <- here('secondYearPaper','figuresBayes')
+tablesDir <- here('secondYearPaper','tables')
+```
+
+```{r}
+load(here('secondYearPaper','R','RObjects','simulationsDF.RData'))
+```
+
+```{r}
+simulationsDF <- simulationsDF %>%
+  mutate(across(V1:V1000, ~ individuals-.x))
+```
+
+```{r}
+totalStatsNet <- simulationsDF %>%
+  mutate(across(V1:V1000, ~ if_else(type=='Out',-.x,.x))) %>%
+  group_by(riskLevel) %>%
+  summarise(across(V1:V1000, ~ sum(.x))) %>%
+  rowwise() %>%
+  mutate(excMigMed_Net = quantile(c_across(V1:V1000),0.5),
+         excMigLow_Net = quantile(c_across(V1:V1000),0.1),
+         excMigUp_Net = quantile(c_across(V1:V1000),0.9)) %>%
+  ungroup() %>%
+  select(-c(V1:V1000))
+```
+
+```{r}
+stateStatsNet <- simulationsDF %>%
+  mutate(across(V1:V1000, ~ if_else(type=='Out',-.x,.x))) %>%
+  group_by(state,riskLevel) %>%
+  summarise(across(V1:V1000, ~ sum(.x))) %>%
+  ungroup() %>%
+  rowwise() %>%
+  mutate(excMigMed_Net = quantile(c_across(V1:V1000),0.5),
+         excMigLow_Net = quantile(c_across(V1:V1000),0.1),
+         excMigUp_Net = quantile(c_across(V1:V1000),0.9)) %>%
+  ungroup() %>%
+  select(-c(V1:V1000))
+```
+
+```{r}
+yearStatsNet <- simulationsDF %>%
+  mutate(across(V1:V1000, ~ if_else(type=='Out',-.x,.x))) %>%
+  group_by(year,riskLevel) %>%
+  summarise(across(V1:V1000, ~ sum(.x))) %>%
+  ungroup() %>%
+  rowwise() %>%
+  mutate(excMigMed_Net = quantile(c_across(V1:V1000),0.5),
+         excMigLow_Net = quantile(c_across(V1:V1000),0.1),
+         excMigUp_Net = quantile(c_across(V1:V1000),0.9)) %>%
+  ungroup() %>%
+  select(-c(V1:V1000))
+```
+
+```{r}
+stateYearStatsNet <- simulationsDF %>%
+  mutate(across(V1:V1000, ~ if_else(type=='Out',-.x,.x))) %>%
+  group_by(state,year,riskLevel) %>%
+  summarise(across(V1:V1000, ~ sum(.x))) %>%
+  ungroup() %>%
+  rowwise() %>%
+  mutate(excMigMed_Net = quantile(c_across(V1:V1000),0.5),
+         excMigLow_Net = quantile(c_across(V1:V1000),0.1),
+         excMigUp_Net = quantile(c_across(V1:V1000),0.9)) %>%
+  ungroup() %>%
+  select(-c(V1:V1000))
+```
+
+```{r}
+summaryTable <- stateYearStatsNet %>%
+  mutate(year = as.character(year)) %>%
+  add_row(yearStatsNet %>% mutate(state='Total',
+                                  year = as.character(year))) %>%
+  add_row(stateStatsNet %>% mutate(year='Total')) %>%
+  add_row(totalStatsNet %>% mutate(year='Total',state='Total'))
+```
+
+```{r}
+
+create_table <- function(data) {
+  gt(data) %>%
+    cols_label(
+      year = 'Year',
+      riskLevel = html("Quintile of<br>Damage Distribution"),
+      excMigMed_Net = 'Median',
+      excMigLow_Net = 'Lower Bound',
+      excMigUp_Net = 'Upper Bound') %>%
+    fmt_number(
+      columns = excMigMed_Net:excMigUp_Net,
+      decimals = 0
+    ) %>%
+    tab_spanner(
+      label = 'Excess Migrants (Net)',
+      columns = c(excMigMed_Net,excMigLow_Net,excMigUp_Net)
+    ) %>%
+    tab_style(
+      style = list(
+        cell_text(weight = "bold")
+        ),
+      locations = cells_body(
+        columns = year,
+        rows = year == 'Total'
+      )
+    ) %>%  
+    tab_header(
+      title = md("Excess Migration by Year"),
+    ) %>%
+    tab_options(table.font.size = '90%',
+                data_row.padding = px(1),
+                row_group.padding = px(2))
+}
+
+```
+
+```{r}
+
+summaryTable <- summaryTable %>%
+  mutate(riskLevel = case_when(riskLevel == 'risk1' ~ '1st',
+                               riskLevel == 'risk2' ~ '2nd',
+                               riskLevel == 'risk3' ~ '3rd',
+                               riskLevel == 'risk4' ~ '4th',
+                               riskLevel == 'risk5' ~ '5th'))
+
+tableData1 <- summaryTable %>%
+  filter(state=='Total',
+         riskLevel!='anyRisk') %>%
+  select(-state) %>%
+  slice(1:55) %>%
+  group_by(year)
+
+tableData2 <- summaryTable %>%
+  filter(state=='Total',
+         riskLevel!='anyRisk') %>%
+  select(-state) %>%
+  slice(56:110) %>%
+  group_by(year)
+
+```
+
+```{r}
+
+summaryTable1 <- create_table(tableData1)
+summaryTable2 <- create_table(tableData2)
+
+gtExtras::gt_two_column_layout(list(summaryTable1,summaryTable2),
+                               output = "save",
+                               filename = "summaryTableByRisk.png",
+                               vwidth = 900, vheight = 620)
+
+```
