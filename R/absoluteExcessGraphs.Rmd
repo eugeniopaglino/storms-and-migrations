@@ -30,63 +30,73 @@ tablesDir <- here('secondYearPaper','tables')
 
 Reading the final data.
 
-```{r, echo=F, cache=T}
-load(here('secondYearPaper','R','RObjects','summariesOut.RData'))
-load(here(outDir,'outMigDataModelReady.RData'))
-load(here('secondYearPaper','R','RObjects','summariesIn.RData'))
-load(here(outDir,'inMigDataModelReady.RData'))
+---
+title: "Absolute Excess Graphs"
+author: "Eugenio Paglino"
+input: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r,echo=FALSE}
+library(here)
+library(patchwork)
+library(gtsummary)
+library(tidyverse)
+```
+
+Setting the working directories.
+
+```{r,echo=FALSE}
+rm(list=ls())
+
+i_am('secondYearPaper/R/absoluteExcessGraphs.Rmd')
+
+inDir <- here('data','input')
+outDir <- here('secondYearPaper','data','output')
+figuresDir <- here('secondYearPaper','figuresBayes')
+tablesDir <- here('secondYearPaper','tables')
+```
+
+Reading the final data.
+
+```{r}
+load(here('secondYearPaper','R','RObjects','simulationsDF.RData'))
+
 ```
 
 ```{r}
-outMigData <- outMigData %>%
-  mutate(type='Out') %>%
-  rename(FIPSCode=origin,
-         riskLevel=destination) %>%
-  arrange(riskLevel,FIPSCode,year)
-
-inMigData <- inMigData %>%
-  mutate(type='In')  %>%
-  rename(FIPSCode=destination,
-         riskLevel=origin) %>%
-  arrange(riskLevel,FIPSCode,year)
-
-migData <- bind_rows(outMigData,inMigData)
+simulationsDF <- simulationsDF %>%
+  filter(!(riskLevel == 'total' & method == 'single'))
 ```
 
 ```{r}
-excessData <- bind_rows(bind_rows(summariesOut),bind_rows(summariesIn)) %>% 
-  mutate(year = migData %>% pull(year),
-         FIPSCode = migData %>% pull(FIPSCode),
-         riskLevel = migData %>% pull(riskLevel),
-         type= migData %>% pull(type),
-         censored = migData %>% pull(censored)) %>%
-  relocate(FIPSCode,year,riskLevel,type)
+excessData <- simulationsDF %>%
+  group_by(state,stateFIPS,census_division,year,riskLevel,type) %>%
+  summarize(across(V1:V1000, ~ sum(individuals-.x,na.rm=T))) %>%
+  ungroup() %>%
+  pivot_longer(V1:V1000,names_to = 'simNum', values_to = 'excMig') %>%
+  group_by(state,stateFIPS,census_division,year,riskLevel,type) %>%
+  summarize(excMigLow = quantile(excMig,probs=c(0.1)),
+            excMigMed = quantile(excMig,probs=c(0.5)),
+            excMigMean= mean(excMig),
+            excMigUp = quantile(excMig,probs=c(0.9))) %>%
+  ungroup()
 ```
 
 ```{r}
 states <- read_csv(here::here(inDir,'utilities','states.csv'))
 
 excessData <- excessData %>%
-  mutate(stateFIPS = str_sub(FIPSCode,1,2)) %>%
-  left_join(states, by = 'stateFIPS')
+  left_join(states, by = c('stateFIPS','state'))
 ```
 
 ```{r}
-statesData <- excessData %>%
-  filter(riskLevel!='anyRisk') %>%
-  group_by(year,riskLevel,state,type) %>%
-  summarize(observed = sum(observed),
-            migMed = sum(migMed)) %>%
-  ungroup() %>%
-  mutate(excMig = observed - migMed,
-         relativeExc = excMig/migMed) %>%
-  ungroup()
-```
-
-```{r}
-sortedStates <- statesData %>%
+sortedStates <- excessData %>%
   group_by(state,year) %>%
-  summarise(excMig = sum(excMig)) %>%
+  summarise(excMig = sum(excMigMean)) %>%
   ungroup() %>%
   group_by(state) %>%
   summarise(maxExcMig = max(abs(excMig))) %>%
@@ -96,7 +106,7 @@ sortedStates <- statesData %>%
 ```
 
 ```{r}
-statesData <- statesData %>%
+statesData <- excessData %>%
   mutate(state=factor(state,levels=sortedStates),
          panel=if_else(state %in% sortedStates[1:(length(sortedStates)-3)],1,2))
 ```
@@ -104,17 +114,18 @@ statesData <- statesData %>%
 ```{r,fig.height=5,fig.width=3}
 absExcessPlotStates1 <- statesData %>%
   filter(panel==1) %>%
+  mutate(typeLong = if_else(type=='In','In-Migration','Out-Migration')) %>%
   ggplot() +
   geom_errorbar(mapping=aes(x=year,ymin=-10,ymax=10),
            color=NA,size=0) +
-  geom_col(mapping=aes(x=year,y=excMig/1000,fill=riskLevel),
+  geom_col(mapping=aes(x=year,y=excMigMean/1000,fill=riskLevel),
            color='black',size=0.1) +
   scale_fill_brewer(palette='Greys',labels=c('1st','2nd','3rd','4th','5th')) +
   scale_y_continuous(breaks=c(-20,-10,0,10,20)) +
   labs(x='',
        y='Migrants in Excess of Prediction (Thousands)',
        fill='Quintile of\nPer Capita Damage\nfrom Natural Disasters\n(Risk Level)') +
-  facet_grid(state~type,scales = 'free_y',space='free_y') +
+  facet_grid(state~typeLong,scales = 'free_y',space='free_y') +
   theme_bw() +
   theme(panel.grid.major.x = element_blank(),
         panel.grid.minor.x = element_blank(),
@@ -128,17 +139,18 @@ absExcessPlotStates1
 ```{r,fig.height=5,fig.width=3}
 absExcessPlotStates2 <- statesData %>%
   filter(panel==2) %>%
+  mutate(typeLong = if_else(type=='In','In-Migration','Out-Migration')) %>%
   ggplot() +
   geom_errorbar(mapping=aes(x=year,ymin=-5,ymax=5),
            color=NA,size=0) +
-  geom_col(mapping=aes(x=year,y=excMig/1000,fill=riskLevel),
+  geom_col(mapping=aes(x=year,y=excMigMean/1000,fill=riskLevel),
            color='black',size=0.1) +
   scale_fill_brewer(palette='Greys',labels=c('1st','2nd','3rd','4th','5th')) +
   scale_y_continuous(breaks=c(-30,-10,0,10,30,60,100,150)) +
   labs(x='',
        y='',
        fill='Quintile of\nPer Capita Damage\nfrom Natural Disasters\n(Risk Level)') +
-  facet_grid(state~type,scales = 'free_y',space='free_y') +
+  facet_grid(state~typeLong,scales = 'free_y',space='free_y') +
   theme_bw() +
   theme(panel.grid.major.x = element_blank(),
         panel.grid.minor.x = element_blank(),
@@ -151,18 +163,16 @@ absExcessPlotStates2
 
 ```{r}
 absExcessPlotTotal <- excessData %>%
-  filter(riskLevel!='anyRisk') %>%
-  group_by(year,riskLevel,type) %>%
-  summarize(observed = sum(observed),
-            migMed = sum(migMed)) %>%
+  filter(riskLevel!='total') %>%
+  mutate(typeLong = if_else(type=='In','In-Migration','Out-Migration')) %>%
+  group_by(year,riskLevel,typeLong) %>%
+  summarize(excMigMean = sum(excMigMean)) %>%
   ungroup() %>%
-  mutate(excMig = observed - migMed,
-         relativeExc = excMig/migMed) %>%
   ggplot() +
-  geom_col(mapping=aes(x=year,y=excMig/1000,fill=riskLevel),
+  geom_col(mapping=aes(x=year,y=excMigMean/1000,fill=riskLevel),
            color='black',size=0.1) +
   scale_fill_brewer(palette='Greys',labels=c('1st','2nd','3rd','4th','5th')) +
-  facet_wrap(~type) + 
+  facet_wrap(~typeLong) + 
   labs(x='',
        y='',
        fill='Quintile of\nPer Capita Damage\nfrom Natural Disasters\n(Risk Level)') +
@@ -171,6 +181,8 @@ absExcessPlotTotal <- excessData %>%
         panel.grid.minor.x = element_blank(),
         legend.position = 'bottom') +
   guides(fill=guide_legend(nrow=2,ncol=3,byrow=T))
+
+absExcessPlotTotal
 ```
 
 ```{r}
@@ -186,7 +198,18 @@ dev.off()
 ```
 
 ```{r}
+load(here(outDir,'outMigDataModelReady.RData'))
+```
 
+```{r}
+outMigData <- outMigData %>%
+  mutate(type='Out') %>%
+  rename(FIPSCode=origin,
+         riskLevel=destination) %>%
+  arrange(riskLevel,FIPSCode,year)
+```
+
+```{r}
 compute_1st_quint <- function(data,variable,...) {
   quantile(data[[variable]],c(0.2),na.rm=T)
 }
@@ -220,7 +243,7 @@ compute_percentile <- function(data,variable,percentile,...) {
 }
 
 outMigData %>%
-  filter(riskLevel=='anyRisk') %>%
+  filter(riskLevel=='total') %>%
   select(logCumSHELDUSDmgPC,logCumAssistancePC,logCumNFIPPC,
          logPopCensus,logPopDensity,
          pctOld,pctBlack,pctWhite,SVI) %>%
@@ -259,4 +282,3 @@ outMigData %>%
   gt::gtsave(filename = here(figuresDir,"descriptiveStats.png"),
              vwidth = 1200,vheight = 744,zoom=4)
 ```
-

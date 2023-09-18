@@ -52,6 +52,17 @@ rm(migDrawsOut)
 
 ```{r}
 simulationsDFOut <- simulationsDFOut %>%
+  filter(riskLevel != 'total') %>%
+  group_by(FIPSCode,year) %>%
+  summarise(across(V1:V1000, ~ sum(.x))) %>%
+  ungroup() %>%
+  mutate(riskLevel = 'total',
+         method = 'pooled') %>%
+  bind_rows(mutate(simulationsDFOut,method='single'))
+```
+
+```{r}
+simulationsDFOut <- simulationsDFOut %>%
   left_join(outMigData,by=c('FIPSCode','year','riskLevel'))
 ```
 
@@ -81,6 +92,17 @@ simulationsDFIn <- simulationsDFIn %>%
          riskLevel = outMigData %>% pull(riskLevel)) %>%
   relocate(year,FIPSCode,riskLevel)
 rm(migDrawsIn)
+```
+
+```{r}
+simulationsDFIn <- simulationsDFIn %>%
+  filter(riskLevel != 'total') %>%
+  group_by(FIPSCode,year) %>%
+  summarise(across(V1:V1000, ~ sum(.x))) %>%
+  ungroup() %>%
+  mutate(riskLevel = 'total',
+         method = 'pooled') %>%
+  bind_rows(mutate(simulationsDFIn,method='single'))
 ```
 
 ```{r}

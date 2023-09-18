@@ -12,7 +12,6 @@ knitr::opts_chunk$set(echo = F,
 
 ```{r}
 # Loading necessary packages
-
 library(here)
 library(gt)
 library(tidyverse)
@@ -21,7 +20,7 @@ library(tidyverse)
 ```{r}
 rm(list=ls())
 
-i_am('secondYearPaper/R/summaryTable.Rmd')
+i_am('secondYearPaper/R/summaryTablePooled.Rmd')
 
 inDir <- here('data','input')
 outDir <- here('secondYearPaper','data','output')
@@ -35,10 +34,10 @@ load(here('secondYearPaper','R','RObjects','simulationsDF.RData'))
 
 ```{r}
 simulationsDF <- simulationsDF %>%
-  filter(riskLevel == 'total',method=='single') %>%
+  filter(riskLevel == 'total', method == 'pooled') %>%
   select(FIPSCode,state,year,type,individuals,V1:V1000) %>%
   arrange(FIPSCode,state,year) %>%
-  mutate(across(V1:V1000, ~ individuals-.x))
+  mutate(across(V1:V1000, ~ individuals-.x)) 
 ```
 
 ```{r}
@@ -233,7 +232,7 @@ summaryTable %>%
   tab_options(table.font.size = '90%',
               data_row.padding = px(1),
               row_group.padding = px(2)) %>%
-  gt::gtsave(filename = here(figuresDir,"summaryTableByYear.png"),
+  gt::gtsave(filename = here(figuresDir,"summaryTableByYearPooled.png"),
              vwidth = 1200,vheight = 1000,zoom=4)
 ```
 
@@ -285,14 +284,14 @@ summaryTable %>%
   tab_options(table.font.size = '90%',
               data_row.padding = px(1),
               row_group.padding = px(2)) %>%
-  gt::gtsave(filename = here(figuresDir,"summaryTableByState.png"),
+  gt::gtsave(filename = here(figuresDir,"summaryTableByStatePooled.png"),
              vwidth = 1200,vheight = 1000,zoom=4)
 ```
 
 ```{r}
 summaryTable %>%
-  filter(year!='Total',
-         state!='Total') %>%
+  filter(state!='Total',
+         year!='Total') %>%
   group_by(state) %>%
   gt() %>%
   cols_label(
@@ -340,3 +339,4 @@ summaryTable %>%
               data_row.padding = px(1),
               row_group.padding = px(4))
 ```
+

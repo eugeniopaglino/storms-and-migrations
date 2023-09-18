@@ -11,22 +11,20 @@ knitr::opts_chunk$set(echo = F,
 ```
 
 ```{r,echo=FALSE}
-
 library(USAboundaries)
 library(sf)
 library(spdep)
 library(INLA)
+library(splines)
 library(patchwork)
 library(here)
 library(glue)
 library(tidyverse)
-
 ```
 
 Setting the working directories.
 
 ```{r}
-
 rm(list=ls())
 
 i_am('secondYearPaper/R/fitInModel.Rmd')
@@ -37,47 +35,15 @@ figuresDir <- here('secondYearPaper','figuresBayes')
 tablesDir <- here('secondYearPaper','tables')
 
 set.seed(42)
-
 ```
 
 Reading the final data.
 
 ```{r, cache=T}
-
 load(here(outDir,'inMigData.RData'))
-
-inMigData <- inMigData %>%
-  filter(!(origin %in% c('00000','99999','riskNA')),
-         year<=2010) %>%
-  distinct(destination,origin,year,.keep_all = T)
-
-completeData <- crossing(destination = unique(pull(inMigData,destination)),
-                         origin = unique(pull(inMigData,origin)),
-                         year = 1990:2010)
-
-destinationData <- inMigData %>%
-  distinct(destination,year,.keep_all = T) %>%
-  select(destination,destName,year,treat,pop,
-         logSHELDUSDmgPC,logCumSHELDUSDmgPC,
-         logNFIPPC,logCumNFIPPC,
-         logAssistancePC,logCumAssistancePC,
-         logPopCensus,logPopDensity,
-         pctYoung,pctOld,pctBlack,pctWhite,
-         socioEcon,houseComp,minorityStat,housing,SVI)
-
-inMigData <- completeData %>%
-  left_join(destinationData,by=c('destination','year')) %>%
-  left_join(select(inMigData,c(destination,origin,year,individuals)),
-            by=c('destination','origin','year')) %>%
-  mutate(individualsImp = floor(rbeta(nrow(completeData),1,1)*9+1),
-         individuals = if_else(is.na(individuals) | individuals==0,
-                               individualsImp,
-                               individuals))
-  
 ```
 
 ```{r}
-
 counties <- us_counties()
 # Transform to Albers for making map of US
 counties <- st_transform(counties, 5070)
@@ -89,11 +55,9 @@ counties <- counties %>%
   rename(FIPSCode = geoid) %>%
   filter(FIPSCode %in% unique(pull(inMigData,destination))) %>%
   arrange(FIPSCode)
-
 ```
 
 ```{r}
-
 neighbors <- poly2nb(counties)
 
 # We can edit neighbors manually but we need to be very careful because
@@ -103,11 +67,9 @@ neighbors <- poly2nb(counties)
 nb2INLA(here(inDir,'neighborsIn.graph'),neighbors)
 inla.graph <- inla.read.graph(here(inDir,'neighborsIn.graph'))
 adj.matrix <- inla.graph2matrix(inla.graph)
-
 ```
 
 ```{r, warning=F, message=F}
-
 neighbors_sf <- as(nb2lines(neighbors, coords = coordinates(as(counties,'Spatial'))), 'sf')
 neighbors_sf <- st_set_crs(neighbors_sf, st_crs(counties))
 
@@ -116,11 +78,9 @@ counties %>%
     geom_sf(fill = 'salmon', color = 'white') +
     geom_sf(data = neighbors_sf) +
     theme_minimal()
-
 ```
 
 ```{r}
-
 inMigData <- inMigData %>%
   arrange(destination,origin,year) %>%
   group_by(destination) %>%
@@ -133,12 +93,11 @@ inMigData <- inMigData %>%
          yearID2 = yearID,
          yearID3 = yearID) %>%
   ungroup()
-
 ```
 
 ```{r}
 nZQuants <- inMigData %>%
-  filter(origin=='anyRisk') %>%
+  filter(origin=='total') %>%
   drop_na(logCumSHELDUSDmgPC) %>%
   filter(logCumSHELDUSDmgPC > 0) %>%
   pull(logCumSHELDUSDmgPC) %>%
@@ -149,29 +108,27 @@ nZQuants <- c(0,nZQuants,max(pull(inMigData,logCumSHELDUSDmgPC),na.rm=T))
 
 ```{r}
 inMigData <- inMigData %>%
-  mutate(censored = if_else(treat=='Yes' & logCumSHELDUSDmgPC >= nZQuants[2],T,F),
+  mutate(censored = if_else(between(altTreat,1,3) & logCumSHELDUSDmgPC >= nZQuants[2],T,F),
          individualsCensored = if_else(censored,NA_real_,individuals),
          countyID = paste(destName,destination))
 ```
 
 ```{r}
-
 hyper.bym <- list(theta1 = list('PCprior', c(1, 0.01)), theta2 = list('PCprior', c(0.5, 0.5)))
 hyper.iid <- list(theta = list(prior="pc.prec", param=c(1, 0.01)))
+hyper.rw1 <- list(theta = list(prior="pc.prec", param=c(1, 0.01)))
 
 # Under Poisson uses default set up
 control.family=inla.set.control.family.default()
 
-formula <- "individualsCensored ~ 1 + offset(log(pop)) + as.factor(year) +
+formula <- "individualsCensored ~ 1 + offset(log(pop)) +
                            f(FIPSID, model='bym2', hyper = hyper.bym,
                              graph = inla.graph, scale.model = T) +
-                           f(yearID2,model='rw1',hyper=hyper.iid,
-                             scale.model=T,replicate=FIPSID2)" 
-
+                           f(yearID,model='rw1',replicate=FIPSID2,
+                             hyper=hyper.rw1,scale.model=T)" 
 ```
 
 ```{r}
-
 fit.inla <- function(data,group,formula) {
   print(group)
   model <- inla(as.formula(formula),
@@ -183,23 +140,19 @@ fit.inla <- function(data,group,formula) {
          control.predictor = list(link=1))
   
   return(model) 
-  
 }
-
 ```
 
 ```{r}
-
 byRisk <- inMigData %>% 
+  select(origin,individuals,individualsCensored,pop,
+         FIPSID,FIPSID2,yearID) %>%
   group_by(origin) %>% 
   nest()
-
 ```
 
 ```{r}
-
 models <- map2(byRisk$data,byRisk$origin,fit.inla,formula = formula)
-
 ```
 
 ```{r}
@@ -257,36 +210,50 @@ names(summariesIn) <- byRisk$origin
 ```
 
 ```{r}
-
 graphData <- inMigData %>%
-  filter(origin=='risk2') %>%
-  arrange(destination) %>%
-  group_by(destination) %>%
+  rename(FIPSCode = destination, riskLevel=origin) %>%
+  arrange(riskLevel,FIPSCode,year) %>%
+  group_by(FIPSCode) %>%
   mutate(FIPSID = cur_group_id()) %>%
   ungroup() %>%
-  rename(FIPSCode = destination) %>%
-  mutate(predMigMed = summariesIn$risk2$migMed,
-         predMigUp = summariesIn$risk2$migUp,
-         predMigLow = summariesIn$risk2$migLow) %>%
-  select(countyID,FIPSID,year,treat,censored,
+  mutate(predMigMed = c(summariesIn$risk1$migMed,
+                        summariesIn$risk2$migMed,
+                        summariesIn$risk3$migMed,
+                        summariesIn$risk4$migMed,
+                        summariesIn$risk5$migMed,
+                        summariesIn$total$migMed),
+         predMigUp = c(summariesIn$risk1$migUp,
+                       summariesIn$risk2$migUp,
+                       summariesIn$risk3$migUp,
+                       summariesIn$risk4$migUp,
+                       summariesIn$risk5$migUp,
+                       summariesIn$total$migUp),
+         predMigLow = c(summariesIn$risk1$migLow,
+                        summariesIn$risk2$migLow,
+                        summariesIn$risk3$migLow,
+                        summariesIn$risk4$migLow,
+                        summariesIn$risk5$migLow,
+                        summariesIn$total$migLow )) %>%
+  select(countyID,FIPSID,year,riskLevel,treat,censored,
          individuals,individualsCensored,pop,
          predMigMed:predMigLow)
-
 ```
 
-```{r}
-
+```{r, fig.height=12,fig.width=8}
 counties <- unique(graphData$countyID)
 
+#'West Baton Rouge 22121'
+#'Orange 51137'
 graphData %>%
-  filter(countyID %in% sample(counties,6)) %>%
+  filter(countyID %in% c(sample(counties,30)),
+         riskLevel=='total') %>%
 ggplot() +
-  geom_point(mapping=aes(x=year,y=individuals/pop,shape=censored,color=treat)) +
+  geom_point(mapping=aes(x=year,y=individuals/pop,shape=censored)) +
   geom_line(mapping=aes(x=year,y=predMigMed/pop,color='Expected')) +
   geom_ribbon(mapping=aes(x=year,ymin=predMigLow/pop,ymax=predMigUp/pop,fill='Expected'),
               alpha=0.3) +
-  facet_wrap(~countyID)
-  
+  facet_wrap(~countyID) +
+  theme_minimal()
 ```
 
 ```{r}

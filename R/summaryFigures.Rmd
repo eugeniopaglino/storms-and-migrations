@@ -1,0 +1,96 @@
+---
+title: "Summary Figures"
+author: "Eugenio Paglino"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F,
+                      message = F,
+                      warning = F)
+```
+
+```{r}
+# Loading necessary packages
+
+library(here)
+library(gt)
+library(tidyverse)
+```
+
+```{r}
+rm(list=ls())
+
+i_am('secondYearPaper/R/summaryFigures.Rmd')
+
+inDir <- here('data','input')
+outDir <- here('secondYearPaper','data','output')
+figuresDir <- here('secondYearPaper','figuresBayes')
+tablesDir <- here('secondYearPaper','tables')
+```
+
+```{r, cache=T}
+load(here('secondYearPaper','R','RObjects','simulationsDF.RData'))
+```
+
+```{r, cache=T}
+countyEffectsInOut <- simulationsDF %>%
+  filter(riskLevel=='total',method=='pooled',censored) %>%
+  pivot_longer(V1:V1000,names_to = 'simNum', values_to = 'expMig') %>%
+  mutate(excMig = individuals-expMig) %>%
+  group_by(FIPSCode,year,type) %>%
+  summarise(excMigMed = quantile(excMig,0.5),
+            excMigLow = quantile(excMig,0.1),
+            excMigUp = quantile(excMig,0.9)) %>%
+  ungroup() %>%
+  group_by(type) %>%
+  summarise(negative = sum(excMigUp < 0)/n() * 100,
+            positive = sum(excMigLow > 0)/n() * 100,
+            neutral = 100 - (negative + negative)) %>%
+  ungroup()
+```
+
+```{r, cache=T}
+countyEffectsNet <- simulationsDF %>%
+  filter(riskLevel=='total',method=='pooled',censored) %>%
+  pivot_longer(V1:V1000,names_to = 'simNum', values_to = 'expMig') %>%
+  mutate(excMig = individuals-expMig,
+         excMig = if_else(type=='Out',-excMig,excMig)) %>%
+  group_by(FIPSCode,year,simNum) %>%
+  summarise(excMig = sum(excMig)) %>%
+  ungroup() %>%
+  group_by(FIPSCode,year) %>%
+  summarise(excMigMed = quantile(excMig,0.5),
+            excMigLow = quantile(excMig,0.1),
+            excMigUp = quantile(excMig,0.9)) %>%
+  ungroup() %>%
+  summarise(negative = sum(excMigUp < 0)/n() * 100,
+            positive = sum(excMigLow > 0)/n() * 100,
+            neutral = 100 - (negative + negative))
+```
+
+```{r}
+countyEffectsNet %>%
+  mutate(type='Net-Migration') %>%
+  add_row(countyEffectsInOut) %>%
+  mutate(type=case_when(type == 'In' ~'In-Migration',
+                        type =='Out'~'Out-Migration',
+                        TRUE ~ 'Net-Migration')) %>%
+  relocate(type) %>%
+  gt() %>%
+  cols_label(type='',
+             negative='Negative Excess',
+             positive='Positive Excess',
+             neutral='Percentage of County-Years with Posterior Probability of Non-Zero Excess <=80%') %>%
+  tab_spanner(
+    label = 'Percentage of County-Years with Posterior Probability of Non-Zero Excess > 80%',
+    columns = negative:positive
+  ) %>%
+  fmt_number(columns = negative:neutral,
+             decimals = 2) %>%
+  cols_width(type ~ px(150),
+             negative:positive ~ px(200),
+             neutral ~ px(250)) %>%
+  gt::gtsave(filename = here(figuresDir,"summaryFigures.png"),zoom=4)
+```
+

@@ -29,11 +29,18 @@ tablesDir <- here('secondYearPaper','tables')
 
 ```{r}
 load(here('secondYearPaper','R','RObjects','simulationsDF.RData'))
+load(here(outDir,'outMigDataModelReady.RData'))
+load(here(outDir,'inMigDataModelReady.RData'))
+```
+
+```{r}
+simulationsDF <- simulationsDF %>%
+  filter(riskLevel=='total',method=='pooled') %>%
+   mutate(across(V1:V1000, ~ individuals-.x)) 
 ```
 
 ```{r}
 bySim <- simulationsDF %>%
-  filter(riskLevel=='anyRisk') %>%
   select(!c(V251:V1000)) %>%
   group_by(year) %>%
   mutate(yearID = cur_group_id()) %>%
@@ -41,8 +48,7 @@ bySim <- simulationsDF %>%
   group_by(FIPSCode) %>%
   mutate(FIPSID = cur_group_id()) %>%
   ungroup() %>%
-  pivot_longer(V1:V250,names_to = 'simNum', values_to = 'expMig') %>%
-  mutate(excMig = individuals-expMig) %>%
+  pivot_longer(V1:V250,names_to = 'simNum', values_to = 'excMig') %>%
   select(type,simNum,
          excMig,damageQuants,NFIPQuants,
          popQuants,densityQuants,
@@ -51,7 +57,6 @@ bySim <- simulationsDF %>%
          year,FIPSCode,yearID,FIPSID) %>%
   group_by(type,simNum) %>% 
   nest()
-rm(simulationsDF)
 ```
 
 ```{r}
@@ -107,21 +112,27 @@ summaryTableMultSim <- coefTable %>%
          naive=F)
 ```
 
-```{r, echo=F, cache=T}
-load(here('secondYearPaper','R','RObjects','summariesOut.RData'))
-load(here(outDir,'outMigDataModelReady.RData'))
-load(here('secondYearPaper','R','RObjects','summariesIn.RData'))
-load(here(outDir,'inMigDataModelReady.RData'))
+```{r}
+excessData <- simulationsDF %>%
+  group_by(FIPSCode,year,type) %>%
+  summarise(across(V1:V1000, ~ sum(.x))) %>%
+  ungroup() %>%
+  rowwise() %>%
+  mutate(excMig = quantile(c_across(V1:V1000),0.5)) %>%
+  ungroup() %>%
+  select(-c(V1:V1000))
 ```
 
 ```{r}
 outMigData <- outMigData %>%
+  filter(destination == 'total') %>%
   mutate(type='Out') %>%
   rename(FIPSCode=origin,
          riskLevel=destination) %>%
   arrange(riskLevel,FIPSCode,year)
 
 inMigData <- inMigData %>%
+  filter(origin == 'total') %>%
   mutate(type='In')  %>%
   rename(FIPSCode=destination,
          riskLevel=origin) %>%
@@ -131,23 +142,12 @@ migData <- bind_rows(outMigData,inMigData)
 ```
 
 ```{r}
-excessData <- bind_rows(bind_rows(summariesOut),bind_rows(summariesIn)) %>% 
-  mutate(year = migData %>% pull(year),
-         FIPSCode = migData %>% pull(FIPSCode),
-         riskLevel = migData %>% pull(riskLevel),
-         type= migData %>% pull(type)) %>%
-  relocate(FIPSCode,year,riskLevel,type)
-```
-
-```{r}
 excessData <- excessData %>%
-  left_join(migData,by=c('year','FIPSCode','riskLevel','type'))
+  left_join(migData,by=c('year','FIPSCode','type'))
 ```
 
 ```{r}
 excessDataByType <- excessData %>%
-  filter(riskLevel=='anyRisk') %>%
-  rename(excMig=excMed) %>%
   group_by(type) %>%
   nest() 
 ```

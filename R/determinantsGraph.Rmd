@@ -73,24 +73,30 @@ summaryTableMult <- summaryTableMult %>%
                                   'Pct White\nPercentiles')),
          naive = if_else(naive,
                          'Treating Excess Migration\nas Fixed',
-                         'Treating Excess Migration\nas Random')) %>%
-  rename('95% Confidence\nIntervals'=naive)
+                         'Treating Excess Migration\nas Random'),
+         typeLong = if_else(type=='In','In-Migration','Out-Migration'))
 ```
 
 ```{r}
 coefPlotMult <- summaryTableMult %>%
   ggplot() +
   geom_vline(xintercept = 0) +
-  geom_errorbarh(mapping=aes(xmin=est-(1.96*se),xmax=est+(1.96*se),y=coefNum,
-                             color=`95% Confidence\nIntervals`),
+  geom_errorbarh(data=filter(summaryTableMult,naive=='Treating Excess Migration\nas Random'),
+                 mapping=aes(xmin=est-(1.96*se),xmax=est+(1.96*se),y=coefNum,
+                             color='Treating Excess Migration\nas Random'),
                  height=1) + 
-  coord_cartesian(xlim=c(-500,2250)) + 
+  geom_errorbarh(data=filter(summaryTableMult,naive=='Treating Excess Migration\nas Fixed'),
+                 mapping=aes(xmin=est-(1.96*se),xmax=est+(1.96*se),y=coefNum,
+                             color='Treating Excess Migration\nas Fixed'),
+                 height=1) + 
+  coord_cartesian(xlim=c(-700,2250)) + 
   scale_x_continuous(breaks=seq(-500,2000,500)) + 
-  facet_grid(coef~type,switch = 'y',scales = 'free_y', space = 'free_y') +
+  facet_grid(coef~typeLong,switch = 'y',scales = 'free_y', space = 'free_y') +
   labs(title='Multivariate Analysis',
        x='Expected Change in the Number of Excess Migrants\nCompared to Base Level',
-       y='') + 
-  scale_color_manual(values=c('black','red')) +
+       y='',
+       color='95% Confidence Interval') + 
+  scale_color_manual(values=c('black','gray')) +
   theme_minimal() +
   theme(strip.text.y.left = element_text(angle=0),
         strip.placement = 'outside',
@@ -133,37 +139,44 @@ summaryTableUniv <- summaryTableUniv %>%
                                   'Pct Black\nPercentiles',
                                   'Pct Old\nPercentiles',
                                   'Pct White\nPercentiles')),
-         naive = if_else(naive,
+         naive = factor(if_else(naive,
                          'Treating Excess Migration\nas Fixed',
-                         'Treating Excess Migration\nas Random')) %>%
-  rename('95% Confidence\nIntervals'=naive)
+                         'Treating Excess Migration\nas Random')),
+         typeLong = if_else(type=='In','In-Migration','Out-Migration'))
 ```
 
 ```{r}
 coefPlotUniv <- summaryTableUniv %>%
   ggplot() +
   geom_vline(xintercept = 0) +
-  geom_errorbarh(mapping=aes(xmin=est-(1.96*se),xmax=est+(1.96*se),y=coefNum,
-                             color=`95% Confidence\nIntervals`),
+  geom_errorbarh(data=filter(summaryTableUniv,naive=='Treating Excess Migration\nas Random'),
+                 mapping=aes(xmin=est-(1.96*se),xmax=est+(1.96*se),y=coefNum,
+                             color='Treating Excess Migration\nas Random'),
                  height=1) + 
-  facet_grid(coef~type,switch = 'y',scales = 'free_y', space = 'free_y') +
+  geom_errorbarh(data=filter(summaryTableUniv,naive=='Treating Excess Migration\nas Fixed'),
+                 mapping=aes(xmin=est-(1.96*se),xmax=est+(1.96*se),y=coefNum,
+                             color='Treating Excess Migration\nas Fixed'),
+                 height=1) + 
+  facet_grid(coef~typeLong,switch = 'y',scales = 'free_y', space = 'free_y') +
   labs(title='Univariate Analysis',
        x='',
-       y='') + 
-  scale_color_manual(values=c('black','red')) +
+       y='',
+       color='95% Confidence Intervals') + 
+  scale_color_manual(values=c('black','gray')) +
   theme_minimal() +
   theme(strip.text.y.left = element_text(angle=0),
         strip.placement = 'outside',
         legend.position = 'bottom',
         panel.grid.major.y = element_blank(),
-        panel.grid.minor.y = element_blank())
+        panel.grid.minor.y = element_blank()) +
+  guides(color='none')
 coefPlotUniv
 ```
 
 ```{r}
 pdf(here(figuresDir,'coefPlots.pdf'), width = 8, height = 14)
-coefPlotUniv / coefPlotMult + plot_layout(guides='collect') &
-  theme(legend.position = 'bottom')
+ggpubr::ggarrange(coefPlotUniv, coefPlotMult,
+          ncol = 1, nrow = 2)
 dev.off()
 ```
 
@@ -198,11 +211,12 @@ summaryTableMultInt <- summaryTableMultInt %>%
 
 ```{r}
 coefPlotMultInt <- summaryTableMultInt %>%
+  mutate(typeLong = if_else(type=='In','In-Migration','Out-Migration')) %>%
   ggplot() +
   geom_vline(xintercept = 0) +
   geom_errorbarh(mapping=aes(xmin=finalEst-(1.96*se/10),xmax=finalEst+(1.96*se/10),y=coefNum),
                  height=0.5) + 
-  facet_grid(intVar~type,switch = 'y',scales = 'free_y', space = 'free_y') +
+  facet_grid(intVar~typeLong,switch = 'y',scales = 'free_y', space = 'free_y') +
   labs(x='Expected Change in the Number of Excess Migrants\nfor a 10% increase in Per Capita Damage',
        y='') + 
   theme_minimal() +
